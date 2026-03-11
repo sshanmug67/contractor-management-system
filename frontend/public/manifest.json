@@ -1,0 +1,16 @@
+{
+  "name": "CMS - Contractor App",
+  "short_name": "CMS",
+  "description": "Contractor Management System",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}

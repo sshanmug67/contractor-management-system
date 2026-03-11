@@ -1,0 +1,6 @@
+{
+  "job": ["not_started", "in_progress", "complete", "invoiced", "paid"],
+  "workgroup": ["draft", "pending", "accepted", "rejected", "in_progress", "review", "approved", "complete", "disputed"],
+  "project": ["draft", "planning", "active", "review", "complete", "on_hold", "cancelled"],
+  "invoice": ["draft", "submitted", "ai_validated", "ai_flagged", "pending_approval", "approved", "rejected", "paid"]
+}

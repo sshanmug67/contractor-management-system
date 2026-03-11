@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: cms-dynamodb
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data"
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000/shell/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: cms-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sns,ses,stepfunctions
+      - DEFAULT_REGION=us-east-1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    profiles:
+      - full  # Only start with: docker compose --profile full up
+
+volumes:
+  dynamodb-data:
+    driver: local
+  localstack-data:
+    driver: local

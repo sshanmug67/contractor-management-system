@@ -1,0 +1,17 @@
+-- ============================================================
+-- CMS DATABASE — Migrations
+--
+-- Numbered, sequential SQL files for schema changes after
+-- initial setup. Apply in order to any environment.
+--
+-- Naming: M001_short_description.sql
+--         M002_short_description.sql
+--
+-- Each file should be idempotent where possible (use IF NOT EXISTS).
+-- Record which migrations have been applied per environment.
+--
+-- Example:
+--   M001_add_priority_to_workgroups.sql
+--   M002_add_notifications_table.sql
+--   M003_update_invoice_status_enum.sql
+-- ============================================================

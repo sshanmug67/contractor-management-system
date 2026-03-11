@@ -1,0 +1,27 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.84.0",
+    "boto3>=1.42.57",
+    "instructor>=1.14.5",
+    "openai>=2.24.0",
+    "pydantic>=2.12.5",
+    "python-dateutil>=2.9.0.post0",
+    "tiktoken>=0.12.0",
+    "ulid-py>=1.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "black>=26.1.0",
+    "flake8>=7.3.0",
+    "httpx>=0.28.1",
+    "moto>=5.1.21",
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+]

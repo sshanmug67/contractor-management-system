@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/.venv/
+
+# Build outputs
+frontend/dist/
+frontend/build/
+backend/.aws-sam/
+
+# Environment files
+.env
+.env.local
+.env.production
+frontend/.env
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# SAM / CDK
+.aws-sam/
+cdk.out/
+samconfig.toml
+
+# Coverage
+coverage/
+frontend/coverage/
+
+# TypeScript cache
+*.tsbuildinfo
