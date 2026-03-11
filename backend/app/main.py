@@ -21,6 +21,7 @@ from app.routers import (
     uploads,
     checkins,
     analytics,
+    dashboard,
 )
 from app.auth import router as auth_router
 
@@ -57,7 +58,7 @@ app.include_router(messages.router,         prefix="/api/messages",    tags=["Me
 app.include_router(uploads.router,          prefix="/api/uploads",     tags=["Uploads"])
 app.include_router(checkins.router,         prefix="/api/checkins",    tags=["Check-ins"])
 app.include_router(analytics.router,        prefix="/api/analytics",   tags=["Analytics"])
-
+app.include_router(dashboard.router,        prefix="/api/dashboard",   tags=["Dashboard"])
 
 # ── Health Check ──────────────────────────────────────
 @app.get("/api/health", tags=["System"])

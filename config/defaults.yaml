@@ -1,0 +1,102 @@
+# ============================================================
+# CMS — Default Configuration
+#
+# Safe defaults committed to git.
+# All secrets MUST come from environment variables.
+# Priority: Environment Variables > defaults.yaml > Hardcoded
+# ============================================================
+
+# ── Application ───────────────────────────────────────
+app:
+  env: "development"
+  debug: true
+  log_level: "info"
+  host: "0.0.0.0"
+  port: 8000
+
+# ── Supabase ──────────────────────────────────────────
+# Keys MUST come from environment variables (project root .env)
+supabase:
+  url: ""
+  publishable_key: ""
+
+# ── Claude AI Agent ───────────────────────────────────
+ai_agent:
+  enabled: true
+  model: "claude-sonnet-4-20250514"
+  api_key: ""
+  max_tokens: 4096
+  temperature: 0.3
+  # Agent capabilities
+  auto_reminders: true
+  auto_allocation: false
+  document_ocr: true
+  anomaly_detection: true
+
+# ── Authentication ────────────────────────────────────
+auth:
+  # QR-based contractor auth
+  qr_token_secret: "change-me-in-production"
+  qr_base_url: "http://localhost:5173/wg"
+  qr_token_expiry_hours: 720          # 30 days
+  # Session settings
+  session_timeout_minutes: 480         # 8 hours
+  refresh_token_days: 30
+
+# ── Notifications ─────────────────────────────────────
+notifications:
+  enabled: false
+  # Twilio SMS
+  twilio_account_sid: ""
+  twilio_auth_token: ""
+  twilio_phone_number: ""
+  # Email (future)
+  email_provider: "ses"
+  email_from: "noreply@cms.app"
+
+# ── AWS ───────────────────────────────────────────────
+aws:
+  region: "us-east-1"
+  access_key_id: ""
+  secret_access_key: ""
+  s3_bucket: "cms-uploads"
+  s3_presigned_expiry_seconds: 3600
+
+# ── Background Workers ───────────────────────────────
+workers:
+  # Contractor no-response reminders
+  reminder_enabled: true
+  reminder_check_interval_seconds: 3600
+  no_response_reminder_hours: 24
+  no_response_escalation_hours: 48
+  # Progress recalculation
+  progress_recalc_enabled: true
+  progress_recalc_interval_seconds: 300
+  # Overdue detection
+  overdue_check_enabled: true
+  overdue_check_interval_seconds: 3600
+
+# ── Business Rules ────────────────────────────────────
+business:
+  # Geo-fencing
+  default_geo_fence_radius_m: 200
+  gps_check_tolerance_m: 50
+  # Invoices
+  invoice_variance_threshold_pct: 10.0
+  invoice_auto_approve_below: 500.00
+  # Allocation scoring weights (must sum to 1.0)
+  allocation_weight_skill: 0.30
+  allocation_weight_performance: 0.25
+  allocation_weight_availability: 0.20
+  allocation_weight_proximity: 0.15
+  allocation_weight_pricing: 0.10
+
+# ── Redis / Celery ────────────────────────────────────
+redis:
+  url: "redis://localhost:6379/0"
+
+# ── CORS ──────────────────────────────────────────────
+cors:
+  allowed_origins:
+    - "http://localhost:5173"
+    - "http://localhost:3000"
