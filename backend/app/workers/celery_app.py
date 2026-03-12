@@ -4,14 +4,20 @@ CMS Celery Application
 Central Celery configuration with Beat schedule for periodic tasks.
 Broker and result backend use Redis.
 
-Start worker:   celery -A app.workers.celery_app worker --loglevel=info
+Logging: All workers write to backend/logs/celery_workers.log
+via the CMS special logging system. Each task tags its messages
+with [WORKER_NAME] for easy filtering.
+
+Start worker:   celery -A app.workers.celery_app worker --loglevel=info --pool=solo
 Start beat:     celery -A app.workers.celery_app beat --loglevel=info
 Start flower:   celery -A app.workers.celery_app flower --port=5555
 """
 
 import os
+import logging
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_init, task_prerun, task_postrun, task_failure, beat_init
 
 from app.cache.redis_config import get_redis_config
 
@@ -35,18 +41,18 @@ app.conf.update(
     enable_utc=True,
 
     # Task behavior
-    task_acks_late=True,                    # Ack after completion (crash safety)
-    task_reject_on_worker_lost=True,        # Re-queue if worker dies
-    worker_prefetch_multiplier=1,           # One task at a time per process
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    worker_prefetch_multiplier=1,
 
     # Result expiration
-    result_expires=3600,                    # Clean up results after 1 hour
+    result_expires=3600,
 
     # Retry defaults
-    task_default_retry_delay=10,            # 10 seconds
+    task_default_retry_delay=10,
     task_max_retries=3,
 
-    # Task routes (optional: separate queues for different priorities)
+    # Task routes
     task_routes={
         "app.workers.notification_worker.*": {"queue": "notifications"},
         "app.workers.invoice_worker.*": {"queue": "invoices"},
@@ -56,43 +62,31 @@ app.conf.update(
         "app.workers.verification_worker.*": {"queue": "periodic"},
     },
 
-    # Default queue for tasks not explicitly routed
     task_default_queue="default",
 )
 
 # ── Beat Schedule (Periodic Tasks) ────────────────────────
-# Intervals are configurable via env vars with sensible defaults.
-
 app.conf.beat_schedule = {
-    # Dashboard stats refresh — every 5 minutes
     "refresh-dashboard-stats": {
         "task": "app.workers.dashboard_stats_worker.refresh_dashboard_stats",
         "schedule": int(os.getenv("CMS_BEAT_DASHBOARD", 300)),
         "options": {"queue": "periodic"},
     },
-
-    # AI insights generation — every 30 minutes
     "generate-ai-insights": {
         "task": "app.workers.insights_worker.generate_ai_insights",
         "schedule": int(os.getenv("CMS_BEAT_INSIGHTS", 1800)),
         "options": {"queue": "periodic"},
     },
-
-    # Stale session cleanup — every 1 hour
     "cleanup-stale-sessions": {
         "task": "app.workers.stale_session_worker.cleanup_stale_sessions",
         "schedule": int(os.getenv("CMS_BEAT_CLEANUP", 3600)),
         "options": {"queue": "periodic"},
     },
-
-    # Deadline monitor — every 6 hours
     "monitor-deadlines": {
         "task": "app.workers.deadline_monitor_worker.monitor_deadlines",
         "schedule": int(os.getenv("CMS_BEAT_DEADLINE", 21600)),
         "options": {"queue": "periodic"},
     },
-
-    # Contractor verification — daily at 2 AM
     "verify-contractors": {
         "task": "app.workers.verification_worker.verify_contractors",
         "schedule": crontab(
@@ -103,7 +97,7 @@ app.conf.beat_schedule = {
     },
 }
 
-# ── Auto-discover tasks from worker modules ───────────────
+# ── Auto-discover tasks ──────────────────────────────────
 app.autodiscover_tasks([
     "app.workers.notification_worker",
     "app.workers.invoice_worker",
@@ -117,3 +111,96 @@ app.autodiscover_tasks([
     "app.workers.deadline_monitor_worker",
     "app.workers.verification_worker",
 ])
+
+
+# ══════════════════════════════════════════════════════════
+# LOGGING — Celery Signal Hooks
+# ══════════════════════════════════════════════════════════
+
+_celery_logger = None  # Initialized on worker/beat startup
+
+
+def _get_celery_logger():
+    """Get or create the celery_workers special logger."""
+    global _celery_logger
+    if _celery_logger is None:
+        from app.config.logging_config import setup_special_logging
+        _celery_logger = setup_special_logging(
+            log_file_name="celery_workers",
+            logger_name="special.celery_workers",
+            fresh_start=False,
+        )
+    return _celery_logger
+
+
+def _log(tag: str, message: str):
+    """Write a tagged message to the celery_workers log."""
+    from app.config.logging_config import log_special_raw
+    log_special_raw(
+        f"[{tag}] {message}",
+        logger_name="special.celery_workers",
+    )
+
+
+# ── Worker Startup ────────────────────────────────────────
+
+@worker_init.connect
+def on_worker_init(**kwargs):
+    """Called when a Celery worker process starts."""
+    logger = _get_celery_logger()
+    _log("WORKER", f"Worker started — broker: {redis_config.broker_url}")
+    _log("WORKER", f"Queues: {list(app.conf.beat_schedule.keys())}")
+
+
+# ── Beat Startup ──────────────────────────────────────────
+
+@beat_init.connect
+def on_beat_init(**kwargs):
+    """Called when Celery Beat scheduler starts."""
+    logger = _get_celery_logger()
+    _log("BEAT", "Beat scheduler started")
+    for name, entry in app.conf.beat_schedule.items():
+        schedule = entry.get("schedule")
+        _log("BEAT", f"  Scheduled: {name} — every {schedule}")
+
+
+# ── Task Lifecycle ────────────────────────────────────────
+
+@task_prerun.connect
+def on_task_prerun(task_id, task, args, kwargs, **kw):
+    """Called just before a task executes."""
+    _get_celery_logger()
+    tag = _task_tag(task.name)
+    _log(tag, f"STARTED — task_id={task_id}")
+
+
+@task_postrun.connect
+def on_task_postrun(task_id, task, args, kwargs, retval, state, **kw):
+    """Called after a task completes (success or failure)."""
+    _get_celery_logger()
+    tag = _task_tag(task.name)
+    _log(tag, f"FINISHED — task_id={task_id} state={state}")
+
+
+@task_failure.connect
+def on_task_failure(task_id, exception, traceback, sender, **kw):
+    """Called when a task raises an exception."""
+    _get_celery_logger()
+    tag = _task_tag(sender.name)
+    _log(tag, f"FAILED — task_id={task_id} error={exception}")
+
+
+# ── Tag Helper ────────────────────────────────────────────
+
+def _task_tag(task_name: str) -> str:
+    """
+    Extract a short tag from the full task name.
+
+    'app.workers.notification_worker.send_notification' → 'NOTIFICATION'
+    'app.workers.dashboard_stats_worker.refresh_dashboard_stats' → 'DASHBOARD_STATS'
+    """
+    parts = task_name.split(".")
+    if len(parts) >= 3:
+        worker_name = parts[-2]  # e.g., 'notification_worker'
+        return worker_name.replace("_worker", "").upper()
+    return task_name.upper()

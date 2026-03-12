@@ -32,6 +32,13 @@ special_loggers:
   api_requests: true
   api_responses: true
 
+  # ── Background Workers ─────────────────────────
+  worker_reminders: true
+  worker_progress_recalc: true
+  worker_overdue_check: true
+  celery_workers: true
+  celery_beat: true
+
   # ── Dashboard ──────────────────────────────────
   dashboard_queries: true
 

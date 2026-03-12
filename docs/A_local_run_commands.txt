@@ -1,8 +1,29 @@
 
-# TO run frontend.
-cd frontend.
-npm run dev
+8000 — CVE Intel Search
+8005 — CVE Intel Pipeline
+8010 — CMS Backend
+
+7e6658de3158   redis:7-alpine   "docker-entrypoint.s…"   6 seconds ago   Up 5 seconds   0.0.0.0:6380->6379/tcp   cms_redis_dev
+5cd7053d27cf   redis:7-alpine   "docker-entrypoint.s…"   2 days ago      Up 26 hours    0.0.0.0:6379->6379/tcp   cve_redis_dev
+
+
+# To run Docker 
+docker run -d --name cms_redis_dev -p 6380:6379 redis:7-alpine
+
+# to restart redis in Docker:
+docker start cms_redis_dev
+
+#to clear the cache:
+docker exec cms_redis_dev redis-cli FLUSHDB
+
+# To run Celery Worker.
+cd backend
+celery -A app.workers.celery_app worker --loglevel=info --pool=solo -Q default,notifications,invoices,geo,periodic
 
 # To run backend.
 cd backend
 uv run uvicorn app.main:app --reload --port 8000
+
+# TO run frontend.
+cd frontend.
+npm run dev
