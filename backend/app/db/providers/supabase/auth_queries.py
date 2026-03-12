@@ -9,7 +9,8 @@ Handles:
 """
 
 from typing import Optional
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.auth_repository import IAuthRepository
 
 # ── Cross-table: QR token with full context ───────────────
 
@@ -37,7 +38,7 @@ GET_QR_TOKEN_CONTEXT = """
 """
 
 
-class AuthRepository(BaseRepository):
+class AuthRepository(SupabaseBaseRepository, IAuthRepository):
     """Queries for authentication and session management."""
 
     # ── Business Owner Auth ───────────────────────────────
@@ -176,3 +177,62 @@ class AuthRepository(BaseRepository):
             "employee": employee,
             "worksite_assignments": assignments.data or [],
         }
+
+    async def deactivate_qr_token(self, workgroup_id: str) -> bool:
+        """Deactivate QR tokens for a completed workgroup."""
+        result = (
+            self.client.table("qr_tokens")
+            .update({"is_active": False})
+            .eq("workgroup_id", workgroup_id)
+            .execute()
+        )
+        return len(result.data or []) > 0
+
+    async def expire_old_tokens(self) -> int:
+        """Deactivate all expired QR tokens."""
+        from datetime import datetime
+        now = datetime.utcnow().isoformat()
+        result = (
+            self.client.table("qr_tokens")
+            .update({"is_active": False})
+            .eq("is_active", True)
+            .lt("expires_at", now)
+            .execute()
+        )
+        return len(result.data or [])
+
+    async def get_or_create_worker_session(
+        self, contractor_id: str, first_name: str, last_name: str,
+        phone: str, email: str = None,
+    ) -> dict:
+        """Look up or create a self-identified worker."""
+        # Check if worker already exists
+        existing = (
+            self.client.table("contractor_workers")
+            .select("*")
+            .eq("contractor_id", contractor_id)
+            .eq("phone", phone)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            worker = existing.data[0]
+            # Update last active
+            await self.update_one("contractor_workers", worker["id"], {
+                "last_active_at": "now()",
+            })
+            return worker
+        else:
+            return await self.insert_one("contractor_workers", {
+                "contractor_id": contractor_id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "phone": phone,
+                "email": email,
+            })
+
+    async def update_worker_last_active(self, worker_id: str) -> None:
+        """Update last_active_at timestamp."""
+        await self.update_one("contractor_workers", worker_id, {
+            "last_active_at": "now()",
+        })

@@ -16,7 +16,8 @@ services:
       --port 8000
       --reload
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
       - cms-network
 
@@ -25,6 +26,13 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - cms-network
 
@@ -33,9 +41,48 @@ services:
     build: .
     env_file:
       - .env
-    command: celery -A app.worker worker --loglevel=info
+    volumes:
+      - .:/app
+    command: >
+      celery -A app.workers.celery_app worker
+      --loglevel=info
+      --concurrency=4
+      -Q default,notifications,invoices,geo,periodic
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    networks:
+      - cms-network
+
+  # ── Celery Beat (periodic task scheduler) ────
+  celery-beat:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    command: >
+      celery -A app.workers.celery_app beat
+      --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cms-network
+
+  # ── Flower (Celery monitoring dashboard) ─────
+  flower:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "5555:5555"
+    command: >
+      celery -A app.workers.celery_app flower
+      --port=5555
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - cms-network
 
@@ -45,3 +92,6 @@ services:
 networks:
   cms-network:
     driver: bridge
+
+volumes:
+  redis-data:

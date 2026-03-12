@@ -9,7 +9,8 @@ Handles:
 """
 
 from typing import Optional
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.project_repository import IProjectRepository
 
 # ── Cross-table: Project detail with aggregated stats ─────
 
@@ -35,7 +36,7 @@ GET_PROJECT_WORKSITES = """
 """
 
 
-class ProjectRepository(BaseRepository):
+class ProjectRepository(SupabaseBaseRepository, IProjectRepository):
     """Queries for project operations."""
 
     TABLE = "projects"

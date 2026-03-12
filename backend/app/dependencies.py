@@ -1,82 +1,106 @@
 """
 CMS Backend — Dependency Injection
 
-Provides shared dependencies to route handlers:
-- Supabase client
-- Repository instances (query-oriented, cross-table)
-- Current authenticated user (business owner side)
-- Current contractor worker (QR auth side)
+Provides shared dependencies to route handlers via ProviderRegistry.
+Provider selection (Supabase vs self-hosted) is handled by the registry.
+Route handlers never know which provider they're using.
+
+Changes from original:
+- Removed direct Supabase client injection
+- All repositories accessed via ProviderRegistry
+- Auth dependencies remain provider-aware (will be abstracted in Phase B)
 """
 
 from fastapi import Depends, HTTPException, Header, status
 from typing import Optional
 
 from app.config import get_settings
-from app.db.supabase_client import get_supabase_client
-from app.db.repositories import (
-    ProjectRepository,
-    WorksiteRepository,
-    WorkgroupRepository,
-    JobRepository,
-    InvoiceRepository,
-    ContractorRepository,
-    CheckinRepository,
-    DashboardRepository,
-    AllocationRepository,
-    AuthRepository,
+from app.providers import get_provider_registry, ProviderRegistry
+
+# Import interfaces for type hints (not implementations)
+from app.db.interfaces import (
+    IProjectRepository,
+    IWorksiteRepository,
+    IWorkgroupRepository,
+    IJobRepository,
+    IInvoiceRepository,
+    IContractorRepository,
+    ICheckinRepository,
+    IDashboardRepository,
+    IAllocationRepository,
+    IAuthRepository,
 )
 
 
-# ── Supabase Client ───────────────────────────────────────
+# ── Provider Registry ─────────────────────────────────────
 
-def get_db():
-    """Get Supabase client instance."""
-    return get_supabase_client()
+def get_providers() -> ProviderRegistry:
+    """Get the singleton ProviderRegistry."""
+    return get_provider_registry()
 
 
-# ── Repository Factory ────────────────────────────────────
-# Each repository gets the shared Supabase client.
-# Route handlers depend on the specific repository they need.
+# ── Repository Dependencies ───────────────────────────────
+# Each returns the interface type, hiding the concrete provider.
 
-def get_project_repo(db=Depends(get_db)) -> ProjectRepository:
-    return ProjectRepository(db)
+def get_project_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IProjectRepository:
+    return providers.projects
 
-def get_worksite_repo(db=Depends(get_db)) -> WorksiteRepository:
-    return WorksiteRepository(db)
+def get_worksite_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IWorksiteRepository:
+    return providers.worksites
 
-def get_workgroup_repo(db=Depends(get_db)) -> WorkgroupRepository:
-    return WorkgroupRepository(db)
+def get_workgroup_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IWorkgroupRepository:
+    return providers.workgroups
 
-def get_job_repo(db=Depends(get_db)) -> JobRepository:
-    return JobRepository(db)
+def get_job_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IJobRepository:
+    return providers.jobs
 
-def get_invoice_repo(db=Depends(get_db)) -> InvoiceRepository:
-    return InvoiceRepository(db)
+def get_invoice_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IInvoiceRepository:
+    return providers.invoices
 
-def get_contractor_repo(db=Depends(get_db)) -> ContractorRepository:
-    return ContractorRepository(db)
+def get_contractor_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IContractorRepository:
+    return providers.contractors
 
-def get_checkin_repo(db=Depends(get_db)) -> CheckinRepository:
-    return CheckinRepository(db)
+def get_checkin_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> ICheckinRepository:
+    return providers.checkins
 
-def get_dashboard_repo(db=Depends(get_db)) -> DashboardRepository:
-    return DashboardRepository(db)
+def get_dashboard_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IDashboardRepository:
+    return providers.dashboard
 
-def get_allocation_repo(db=Depends(get_db)) -> AllocationRepository:
-    return AllocationRepository(db)
+def get_allocation_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IAllocationRepository:
+    return providers.allocation
 
-def get_auth_repo(db=Depends(get_db)) -> AuthRepository:
-    return AuthRepository(db)
+def get_auth_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IAuthRepository:
+    return providers.auth
 
 
 # ── Business Owner Auth (Supabase JWT) ────────────────────
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
-    auth_repo: AuthRepository = Depends(get_auth_repo),
+    auth_repo: IAuthRepository = Depends(get_auth_repo),
 ):
     """
-    Validate Supabase JWT from Authorization header.
+    Validate JWT from Authorization header.
     Returns the authenticated user profile with org context.
 
     Used for: Business Owner dashboard endpoints.
@@ -89,8 +113,8 @@ async def get_current_user(
 
     token = authorization.split(" ")[1]
 
-    # TODO: Validate JWT via Supabase Auth
-    # TODO: Extract user_id from JWT payload
+    # TODO: Validate JWT via AuthProvider (Phase B abstraction)
+    # For now, Supabase JWT validation
     # user_id = validate_supabase_jwt(token)
     # profile = await auth_repo.get_user_profile(user_id)
     # return profile
@@ -105,7 +129,7 @@ async def get_current_user(
 
 async def get_current_worker(
     authorization: Optional[str] = Header(None),
-    auth_repo: AuthRepository = Depends(get_auth_repo),
+    auth_repo: IAuthRepository = Depends(get_auth_repo),
 ):
     """
     Validate QR session token from Authorization header.
@@ -123,8 +147,8 @@ async def get_current_worker(
 
     # TODO: Decode session token
     # TODO: Look up worker + contractor + workgroup context
-    # TODO: Update last_active_at
-    # TODO: Return worker dict
+    # session = await auth_repo.validate_qr_token(token)
+    # ...
 
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,

@@ -5,10 +5,10 @@ Fetches all data needed for the Owner Dashboard in minimal DB round-trips.
 Assembles the nested structure: Project → Worksites → Workgroups → Jobs.
 """
 
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.dashboard_repository import IDashboardRepository
 
-
-class DashboardRepository(BaseRepository):
+class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
     """Queries for the owner dashboard."""
 
     async def get_owner_dashboard(self, org_id: str, project_id: str = None) -> dict:

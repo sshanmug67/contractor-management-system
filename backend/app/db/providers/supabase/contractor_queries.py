@@ -9,10 +9,10 @@ Handles:
 """
 
 from typing import Optional
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.contractor_repository import IContractorRepository
 
-
-class ContractorRepository(BaseRepository):
+class ContractorRepository(SupabaseBaseRepository, IContractorRepository):
     """Queries for contractor pool management."""
 
     TABLE = "contractors"
@@ -131,3 +131,107 @@ class ContractorRepository(BaseRepository):
         """Find verifications expiring within N days (for scheduled alerts)."""
         # TODO: expires_at < NOW() + interval days_ahead days
         return []
+
+    async def search_by_skills(
+        self, org_id: str, skills: list[str],
+        worksite_lat: float = None, worksite_lng: float = None,
+    ) -> list[dict]:
+        """Find contractors matching skills, optionally sorted by proximity."""
+        result = (
+            self.client.table("contractors")
+            .select("*")
+            .eq("org_id", org_id)
+            .eq("is_active", True)
+            .overlaps("skills", skills)
+            .execute()
+        )
+        return result.data or []
+
+    async def upsert_worker(
+        self, contractor_id: str, first_name: str, last_name: str,
+        phone: str, email: str = None,
+    ) -> dict:
+        """Create or update a self-identified worker."""
+        # Check if worker exists by phone + contractor
+        existing = (
+            self.client.table("contractor_workers")
+            .select("*")
+            .eq("contractor_id", contractor_id)
+            .eq("phone", phone)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            worker_id = existing.data[0]["id"]
+            return await self.update_one("contractor_workers", worker_id, {
+                "last_active_at": "now()",
+            })
+        else:
+            return await self.insert_one("contractor_workers", {
+                "contractor_id": contractor_id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "phone": phone,
+                "email": email,
+            })
+
+    async def get_workers(self, contractor_id: str) -> list[dict]:
+        """Get all self-identified workers for a contractor company."""
+        result = (
+            self.client.table("contractor_workers")
+            .select("*")
+            .eq("contractor_id", contractor_id)
+            .order("first_seen_at")
+            .execute()
+        )
+        return result.data or []
+
+    async def add_verification(self, contractor_id: str, data: dict) -> dict:
+        """Add a verification record."""
+        data["contractor_id"] = contractor_id
+        return await self.insert_one("contractor_verifications", data)
+
+    async def get_verifications(self, contractor_id: str) -> list[dict]:
+        """Get all verification records for a contractor."""
+        result = (
+            self.client.table("contractor_verifications")
+            .select("*")
+            .eq("contractor_id", contractor_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return result.data or []
+
+    async def get_stale_verifications(self, days_threshold: int = 30) -> list[dict]:
+        """Get contractors needing re-verification."""
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=days_threshold)).isoformat()
+        result = (
+            self.client.table("contractors")
+            .select("*")
+            .eq("is_active", True)
+            .or_(f"last_verified_at.is.null,last_verified_at.lt.{cutoff}")
+            .execute()
+        )
+        return result.data or []
+
+    async def update_verification_status(self, contractor_id: str, status: str) -> None:
+        """Update contractor verification status."""
+        from datetime import datetime
+        await self.update_one("contractors", contractor_id, {
+            "verification_status": status,
+            "last_verified_at": datetime.utcnow().isoformat(),
+        })
+
+    async def validate_credentials(self, email: str, phone: str) -> dict:
+        """Validate contractor company shared credentials (QR auth)."""
+        result = (
+            self.client.table("contractors")
+            .select("*")
+            .eq("email", email)
+            .eq("phone", phone)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None

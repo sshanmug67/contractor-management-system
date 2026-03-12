@@ -11,7 +11,7 @@ from typing import Optional
 from supabase import Client
 
 
-class BaseRepository:
+class SupabaseBaseRepository:
     """Base class for all query repositories."""
 
     def __init__(self, client: Client):

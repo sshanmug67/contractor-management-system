@@ -10,7 +10,8 @@ Handles:
 """
 
 from typing import Optional
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.workgroup_repository import IWorkgroupRepository
 
 # ── Cross-table: Full workgroup detail ────────────────────
 # This is the core query — one API call, 7 tables
@@ -95,7 +96,7 @@ GET_ACCEPTANCE_INFO = """
 """
 
 
-class WorkgroupRepository(BaseRepository):
+class WorkgroupRepository(SupabaseBaseRepository, IWorkgroupRepository):
     """Queries for workgroup operations — the core of the CMS workflow."""
 
     TABLE = "workgroups"
@@ -258,3 +259,11 @@ class WorkgroupRepository(BaseRepository):
     async def cascade_progress(self, workgroup_id: str):
         """Recalculate workgroup progress from job statuses."""
         return await self.rpc("fn_recalculate_workgroup_progress", {"p_workgroup_id": workgroup_id})
+
+    async def update_status(self, workgroup_id: str, status: str) -> dict:
+        """Update workgroup status."""
+        return await self.update_one("workgroups", workgroup_id, {"status": status})
+
+    async def update_progress(self, workgroup_id: str, progress_pct: float) -> None:
+        """Update workgroup progress percentage."""
+        await self.update_one("workgroups", workgroup_id, {"progress_pct": progress_pct})

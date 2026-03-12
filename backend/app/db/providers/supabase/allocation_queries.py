@@ -13,7 +13,8 @@ Scoring weights (configurable per org):
   10% Pricing History
 """
 
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.allocation_repository import IAllocationRepository
 
 # ── Cross-table: Contractor performance from past workgroups ─
 
@@ -46,7 +47,7 @@ GET_CONTRACTOR_WORKLOAD = """
 """
 
 
-class AllocationRepository(BaseRepository):
+class AllocationRepository(SupabaseBaseRepository, IAllocationRepository):
     """Queries for contractor allocation scoring data."""
 
     async def get_eligible_contractors(self, org_id: str, trade: str) -> list[dict]:
@@ -137,3 +138,30 @@ class AllocationRepository(BaseRepository):
             "avg_budget": sum(budgets) / len(budgets) if budgets else 0,
             "workgroup_count": len(budgets),
         }
+
+    async def get_candidates(self, workgroup_id: str, org_id: str) -> list[dict]:
+        """Get contractor candidates for a workgroup with scoring data."""
+        # Get the workgroup to know required trade/skills
+        wg = await self.fetch_one("workgroups", workgroup_id)
+        if not wg:
+            return []
+
+        trade = wg.get("trade", "")
+
+        # Get all active contractors in this org with matching skills
+        result = (
+            self.client.table("contractors")
+            .select("*, workgroups(count)")
+            .eq("org_id", org_id)
+            .eq("is_active", True)
+            .contains("skills", [trade])
+            .execute()
+        )
+        return result.data or []
+
+    async def allocate_contractor(self, workgroup_id: str, contractor_id: str) -> dict:
+        """Assign a contractor to a workgroup, set status to pending."""
+        return await self.update_one("workgroups", workgroup_id, {
+            "contractor_id": contractor_id,
+            "status": "pending",
+        })

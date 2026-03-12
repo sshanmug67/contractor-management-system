@@ -9,7 +9,8 @@ Handles:
 """
 
 from typing import Optional
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.job_repository import IJobRepository
 
 # ── Cross-table: Job detail with checklist + uploads ──────
 
@@ -42,7 +43,7 @@ GET_JOB_DEPENDENCIES = """
 """
 
 
-class JobRepository(BaseRepository):
+class JobRepository(SupabaseBaseRepository, IJobRepository):
     """Queries for job operations."""
 
     TABLE = "jobs"
@@ -182,3 +183,28 @@ class JobRepository(BaseRepository):
             .execute()
         )
         return result.data or []
+
+    async def update_status(self, job_id: str, status: str) -> dict:
+        """Update job status."""
+        return await self.update_one("jobs", job_id, {"status": status})
+
+    async def get_jobs_for_invoice(self, workgroup_id: str) -> list[dict]:
+        """Get completed jobs that have not been invoiced yet."""
+        result = (
+            self.client.table("jobs")
+            .select("*")
+            .eq("workgroup_id", workgroup_id)
+            .eq("status", "complete")
+            .is_("invoice_id", "null")
+            .order("sequence")
+            .execute()
+        )
+        return result.data or []
+
+    async def mark_jobs_invoiced(self, job_ids: list[str], invoice_id: str) -> None:
+        """Link jobs to an invoice and set status to invoiced."""
+        for job_id in job_ids:
+            self.client.table("jobs").update({
+                "invoice_id": invoice_id,
+                "status": "invoiced",
+            }).eq("id", job_id).execute()

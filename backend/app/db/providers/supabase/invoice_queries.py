@@ -10,7 +10,8 @@ Handles:
 """
 
 from typing import Optional
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.invoice_repository import IInvoiceRepository
 
 # ── Cross-table: Invoice with full context for validation ─
 
@@ -53,7 +54,7 @@ CHECK_DOUBLE_BILLING = """
 """
 
 
-class InvoiceRepository(BaseRepository):
+class InvoiceRepository(SupabaseBaseRepository, IInvoiceRepository):
     """Queries for invoice operations."""
 
     TABLE = "invoices"
@@ -169,3 +170,58 @@ class InvoiceRepository(BaseRepository):
             .execute()
         )
         return result.data or []
+
+    async def update_status(self, invoice_id: str, status: str) -> dict:
+        """Update invoice status."""
+        return await self.update_one("invoices", invoice_id, {"status": status})
+
+    async def set_ai_flags(self, invoice_id: str, validated: bool, flags: list[dict]) -> dict:
+        """Set AI validation result and flags."""
+        return await self.update_one("invoices", invoice_id, {
+            "ai_validated": validated,
+            "ai_flags": flags,
+            "status": "ai_validated" if validated else "ai_flagged",
+        })
+
+    async def reject_invoice(self, invoice_id: str, reason: str) -> dict:
+        """Reject an invoice with reason."""
+        return await self.update_one("invoices", invoice_id, {
+            "status": "rejected",
+            "ai_flags": [{"type": "rejection", "reason": reason}],
+        })
+
+    async def get_cumulative_total(self, workgroup_id: str) -> float:
+        """Sum of all non-rejected invoice amounts for a workgroup."""
+        result = (
+            self.client.table("invoices")
+            .select("amount")
+            .eq("workgroup_id", workgroup_id)
+            .neq("status", "rejected")
+            .execute()
+        )
+        return sum(float(inv["amount"]) for inv in (result.data or []))
+
+    async def check_double_billing(self, workgroup_id: str, job_ids: list[str]) -> list[str]:
+        """Return job_ids that already appear on another invoice."""
+        result = (
+            self.client.table("jobs")
+            .select("id, invoice_id")
+            .in_("id", job_ids)
+            .not_.is_("invoice_id", "null")
+            .execute()
+        )
+        return [job["id"] for job in (result.data or [])]
+
+    async def get_pending_approvals(self, org_id: str) -> list[dict]:
+        """All invoices awaiting approval across org."""
+        result = (
+            self.client.table("invoices")
+            .select("*, workgroups(title, worksite_id, worksites(name, project_id, projects(org_id)))")
+            .eq("status", "pending_approval")
+            .execute()
+        )
+        # Filter by org_id (Supabase nested filter workaround)
+        return [
+            inv for inv in (result.data or [])
+            if inv.get("workgroups", {}).get("worksites", {}).get("projects", {}).get("org_id") == org_id
+        ]

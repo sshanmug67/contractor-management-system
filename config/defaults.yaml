@@ -14,6 +14,9 @@ app:
   host: "0.0.0.0"
   port: 8000
 
+db:
+  provider: "supabase"                      # 'supabase' or 'postgres'
+
 # ── Supabase ──────────────────────────────────────────
 # Keys MUST come from environment variables (project root .env)
 supabase:
@@ -94,6 +97,14 @@ business:
 # ── Redis / Celery ────────────────────────────────────
 redis:
   url: "redis://localhost:6379/0"
+
+# ── Celery Beat Schedules ─────────────────────────────
+celery_beat:
+  dashboard_seconds: 300                    # 5 min — dashboard stats refresh
+  insights_seconds: 1800                    # 30 min — AI insights generation
+  cleanup_seconds: 3600                     # 1 hour — stale session cleanup
+  deadline_seconds: 21600                   # 6 hours — deadline monitor
+  verify_hour: 2                            # 2 AM — daily contractor verification
 
 # ── CORS ──────────────────────────────────────────────
 cors:

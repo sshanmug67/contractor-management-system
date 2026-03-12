@@ -92,8 +92,18 @@ class Settings:
         self.allocation_weight_proximity: float = 0.15
         self.allocation_weight_pricing: float = 0.10
 
+        # ── Database Provider ─────────────────────────
+        self.db_provider: str = "supabase"          # 'supabase' or 'postgres'
+
         # ── Redis ─────────────────────────────────────
         self.redis_url: str = "redis://localhost:6379/0"
+
+        # ── Celery Beat Schedules (seconds) ──────────
+        self.cms_beat_dashboard: int = 300           # 5 min
+        self.cms_beat_insights: int = 1800           # 30 min
+        self.cms_beat_cleanup: int = 3600            # 1 hour
+        self.cms_beat_deadline: int = 21600          # 6 hours
+        self.cms_beat_verify_hour: int = 2           # 2 AM daily
 
         # ── CORS ──────────────────────────────────────
         self.cors_allowed_origins: List[str] = [
@@ -237,6 +247,20 @@ class Settings:
             if "redis" in data:
                 self.redis_url = data["redis"].get("url", self.redis_url)
 
+            # ── Database Provider ─────────────────────
+            if "db" in data:
+                db = data["db"]
+                self.db_provider = db.get("provider", self.db_provider)
+
+            # ── Celery Beat ───────────────────────────
+            if "celery_beat" in data:
+                cb = data["celery_beat"]
+                self.cms_beat_dashboard = cb.get("dashboard_seconds", self.cms_beat_dashboard)
+                self.cms_beat_insights = cb.get("insights_seconds", self.cms_beat_insights)
+                self.cms_beat_cleanup = cb.get("cleanup_seconds", self.cms_beat_cleanup)
+                self.cms_beat_deadline = cb.get("deadline_seconds", self.cms_beat_deadline)
+                self.cms_beat_verify_hour = cb.get("verify_hour", self.cms_beat_verify_hour)
+
             # ── CORS ──────────────────────────────────
             if "cors" in data:
                 origins = data["cors"].get("allowed_origins")
@@ -350,6 +374,23 @@ class Settings:
             self.redis_url = os.getenv("REDIS_URL")
             logger.info("✓ REDIS_URL: Set")
 
+        # ── Database Provider ─────────────────────────
+        if os.getenv("DB_PROVIDER"):
+            self.db_provider = os.getenv("DB_PROVIDER")
+            logger.info(f"✓ DB_PROVIDER: {self.db_provider}")
+
+        # ── Celery Beat ───────────────────────────────
+        if os.getenv("CMS_BEAT_DASHBOARD"):
+            self.cms_beat_dashboard = int(os.getenv("CMS_BEAT_DASHBOARD"))
+        if os.getenv("CMS_BEAT_INSIGHTS"):
+            self.cms_beat_insights = int(os.getenv("CMS_BEAT_INSIGHTS"))
+        if os.getenv("CMS_BEAT_CLEANUP"):
+            self.cms_beat_cleanup = int(os.getenv("CMS_BEAT_CLEANUP"))
+        if os.getenv("CMS_BEAT_DEADLINE"):
+            self.cms_beat_deadline = int(os.getenv("CMS_BEAT_DEADLINE"))
+        if os.getenv("CMS_BEAT_VERIFY_HOUR"):
+            self.cms_beat_verify_hour = int(os.getenv("CMS_BEAT_VERIFY_HOUR"))
+
         # ── CORS ──────────────────────────────────────
         if os.getenv("CORS_ALLOWED_ORIGINS"):
             origins = os.getenv("CORS_ALLOWED_ORIGINS").split(",")
@@ -366,16 +407,20 @@ class Settings:
         errors = []
 
         # ── Critical: Supabase ────────────────────────
-        if not self.supabase_url:
-            errors.append("SUPABASE_URL is REQUIRED")
-        elif not self.supabase_url.startswith("http"):
-            errors.append("SUPABASE_URL must be a valid HTTP/HTTPS URL")
+        if self.db_provider not in ("supabase", "postgres"):
+            errors.append(f"DB_PROVIDER must be 'supabase' or 'postgres' (got '{self.db_provider}')")
 
-        if not self.supabase_publishable_key:
-            errors.append("SUPABASE_PUBLISHABLE_KEY is REQUIRED")
+        if self.db_provider == "supabase":
+            if not self.supabase_url:
+                errors.append("SUPABASE_URL is REQUIRED when DB_PROVIDER=supabase")
+            elif not self.supabase_url.startswith("http"):
+                errors.append("SUPABASE_URL must be a valid HTTP/HTTPS URL")
 
-        if not self.supabase_service_role_key:
-            errors.append("SUPABASE_SERVICE_ROLE_KEY is REQUIRED (backend bypasses RLS)")
+            if not self.supabase_publishable_key:
+                errors.append("SUPABASE_PUBLISHABLE_KEY is REQUIRED when DB_PROVIDER=supabase")
+
+            if not self.supabase_service_role_key:
+                errors.append("SUPABASE_SERVICE_ROLE_KEY is REQUIRED when DB_PROVIDER=supabase")
             
         # ── Warning: AI key ───────────────────────────
         if not self.claude_api_key:
@@ -481,6 +526,16 @@ class Settings:
             f"  Allocation Weights: Skill={self.allocation_weight_skill} Perf={self.allocation_weight_performance} Avail={self.allocation_weight_availability} Prox={self.allocation_weight_proximity} Price={self.allocation_weight_pricing}",
             f"",
             f"Redis: {self.redis_url}",
+            f"",
+            f"Database Provider: {self.db_provider.upper()}",
+            f"",
+            f"Celery Beat Schedules:",
+            f"  Dashboard Stats: every {self.cms_beat_dashboard}s ({self.cms_beat_dashboard // 60}min)",
+            f"  AI Insights: every {self.cms_beat_insights}s ({self.cms_beat_insights // 60}min)",
+            f"  Session Cleanup: every {self.cms_beat_cleanup}s ({self.cms_beat_cleanup // 60}min)",
+            f"  Deadline Monitor: every {self.cms_beat_deadline}s ({self.cms_beat_deadline // 3600}hr)",
+            f"  Contractor Verify: daily at {self.cms_beat_verify_hour}:00 AM",
+            f"",
             f"CORS Origins: {', '.join(self.cors_allowed_origins)}",
             f"",
             "=" * 60,
@@ -503,6 +558,7 @@ class Settings:
                 "host": self.app_host,
                 "port": self.app_port,
             },
+            "db_provider": self.db_provider,
             "supabase": {
                 "url_set": bool(self.supabase_url),
                 "publishable_key_set": bool(self.supabase_publishable_key),

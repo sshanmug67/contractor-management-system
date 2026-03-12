@@ -9,7 +9,8 @@ Handles:
 """
 
 from typing import Optional
-from app.db.repositories.base_repository import BaseRepository
+from app.db.providers.supabase.base_repository import SupabaseBaseRepository
+from app.db.interfaces.worksite_repository import IWorksiteRepository
 
 # ── Cross-table: Worksite detail with contacts ────────────
 
@@ -35,7 +36,7 @@ GET_WORKSITE_WORKGROUPS = """
 """
 
 
-class WorksiteRepository(BaseRepository):
+class WorksiteRepository(SupabaseBaseRepository, IWorksiteRepository):
     """Queries for worksite + contact person operations."""
 
     TABLE = "worksites"
@@ -138,3 +139,19 @@ class WorksiteRepository(BaseRepository):
     async def cascade_progress(self, worksite_id: str):
         """Recalculate worksite progress from workgroup averages."""
         return await self.rpc("fn_recalculate_worksite_progress", {"p_worksite_id": worksite_id})
+
+    async def get_contacts(self, worksite_id: str) -> list[dict]:
+        """Get all contacts for a worksite with employee details."""
+        result = (
+            self.client.table("worksite_contacts")
+            .select("*, business_employees(*)")
+            .eq("worksite_id", worksite_id)
+            .execute()
+        )
+        return result.data or []
+
+    async def update_progress(self, worksite_id: str, progress_pct: float) -> None:
+        """Update worksite progress percentage."""
+        await self.update_one("worksites", worksite_id, {
+            "progress_pct": progress_pct,
+        })
