@@ -1,79 +1,70 @@
 """
-Router — Site Check-ins (GPS)
+Router — Check-ins
 
-Layer 1 of the double-proof geo-verification system.
-Workers check in via GPS before starting work on a workgroup.
+GPS check-in/check-out for contractor workers at worksites.
+Check-in triggers geo_worker for fence validation (Pattern 2 async).
+
+All database access goes through ICheckinRepository via ProviderRegistry.
 """
 
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from app.dependencies import get_db, get_current_worker, get_current_user
-from app.models.checkin import (
-    CheckinCreate, CheckoutRequest,
-    CheckinResponse, CheckinVerification,
-)
+from app.dependencies import get_checkin_repo
+from app.db.interfaces import ICheckinRepository
+
+# Dev org_id from seed data — replace with auth when ready
+DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 
 router = APIRouter()
 
 
-@router.post("/", response_model=CheckinResponse, status_code=201)
+@router.post("/", status_code=202)
 async def check_in(
-    checkin: CheckinCreate,
-    worker=Depends(get_current_worker),
-    db=Depends(get_db),
+    data: dict,
+    # worker=Depends(get_current_worker),  # Contractor auth via QR
+    repo: ICheckinRepository = Depends(get_checkin_repo),
 ):
     """
-    GPS check-in to a worksite.
-    
-    - Calculates distance from worksite center
-    - Verifies within geo-fence radius
-    - Records: worker, GPS, timestamp, distance, device info
-    - Must check in before marking jobs in-progress
+    Record a GPS check-in at a worksite.
+    Pattern 2 (async): create record + fire geo_worker.delay().
     """
-    # TODO: Look up worksite via workgroup → worksite
-    # TODO: Calculate distance (services/geo_verification.py)
-    # TODO: Check within geo-fence radius
-    # TODO: Create site_checkins record
-    # TODO: AI flag if outside geo-fence
+    # TODO: checkin = await repo.create(data)
+    # TODO: geo_worker.delay(checkin['id'], 'checkin')
+    # return {'id': checkin['id'], 'status': 'recorded'}
     pass
 
 
-@router.post("/checkout", response_model=CheckinResponse)
+@router.post("/{checkin_id}/checkout")
 async def check_out(
-    checkout: CheckoutRequest,
-    worker=Depends(get_current_worker),
-    db=Depends(get_db),
+    checkin_id: str,
+    data: dict,
+    # worker=Depends(get_current_worker),
+    repo: ICheckinRepository = Depends(get_checkin_repo),
 ):
-    """Optional check-out. Auto-checked-out after X hours of inactivity."""
-    # TODO: Update site_checkins SET checked_out_at = NOW()
+    """Record check-out time for an existing check-in."""
+    # TODO: repo.checkout(checkin_id, data)
     pass
 
 
-@router.get("/", response_model=list[CheckinResponse])
-async def list_checkins(
-    workgroup_id: Optional[str] = Query(None),
-    worker_id: Optional[str] = Query(None),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    db=Depends(get_db),
+@router.get("/worksite/{worksite_id}")
+async def list_worksite_checkins(
+    worksite_id: str,
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    # user=Depends(get_current_user),
+    repo: ICheckinRepository = Depends(get_checkin_repo),
 ):
-    """List check-in records with filters (for dashboard/analytics)."""
+    """List check-ins for a worksite, optionally filtered by date."""
+    # TODO: repo.get_by_worksite(worksite_id) or repo.get_today_by_worksite(worksite_id)
     return []
 
 
-@router.get("/verify")
-async def verify_location(
-    workgroup_id: str = Query(...),
-    latitude: float = Query(...),
-    longitude: float = Query(...),
-    db=Depends(get_db),
-) -> CheckinVerification:
-    """
-    Pre-check: verify if a GPS position is within worksite geo-fence.
-    Used by the app to show distance before actual check-in.
-    """
-    # TODO: Look up worksite geo-fence
-    # TODO: Calculate distance
-    # TODO: Return verification result
-    pass
+@router.get("/worksite/{worksite_id}/today")
+async def get_today_presence(
+    worksite_id: str,
+    # user=Depends(get_current_user),
+    repo: ICheckinRepository = Depends(get_checkin_repo),
+):
+    """Get today's site presence: who checked in, when, still on-site."""
+    # TODO: repo.get_today_by_worksite(worksite_id)
+    return []

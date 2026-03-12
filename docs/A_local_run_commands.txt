@@ -13,16 +13,23 @@ docker run -d --name cms_redis_dev -p 6380:6379 redis:7-alpine
 # to restart redis in Docker:
 docker start cms_redis_dev
 
-#to clear the cache:
+# to clear the cache:
 docker exec cms_redis_dev redis-cli FLUSHDB
+
+# to check the redis server running.
+docker exec cms_redis_dev redis-cli ping
 
 # To run Celery Worker.
 cd backend
 celery -A app.workers.celery_app worker --loglevel=info --pool=solo -Q default,notifications,invoices,geo,periodic
 
+# To run Celery Beat.
+cd backend
+celery -A app.workers.celery_app beat --loglevel=info
+
 # To run backend.
 cd backend
-uv run uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8010
 
 # TO run frontend.
 cd frontend.

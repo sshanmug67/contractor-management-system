@@ -1,69 +1,77 @@
 """
-Router — Business Employees
+Router — Employees
 
-CRUD for business employees (contact persons for worksites).
+CRUD for business employees (owner's staff, not contractors).
+These are the people on the business side who manage projects.
+
+Database access goes through ProviderRegistry.
+TODO: Add IEmployeeRepository to app/db/interfaces/__init__.py
+      and create get_employee_repo in dependencies.py,
+      then update this router to use the typed dependency.
 """
 
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from app.dependencies import get_db, get_current_user
-from app.models.employee import (
-    EmployeeCreate, EmployeeUpdate,
-    EmployeeResponse, EmployeeDetail,
-)
+from app.dependencies import get_providers
+from app.providers import ProviderRegistry
+
+# Dev org_id from seed data — replace with auth when ready
+DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[EmployeeResponse])
+@router.get("/")
 async def list_employees(
-    is_active: Optional[bool] = Query(None),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """List business employees in the organization."""
+    """List employees in the organization."""
+    # TODO: providers.employees.list_by_org(org_id)
     return []
 
 
-@router.post("/", response_model=EmployeeResponse, status_code=201)
+@router.post("/", status_code=201)
 async def create_employee(
-    employee: EmployeeCreate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    data: dict,
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """Add a new business employee."""
-    # TODO: Insert with org_id from user
+    """Add an employee to the organization."""
+    # TODO: providers.employees.create(org_id, data)
     pass
 
 
-@router.get("/{employee_id}", response_model=EmployeeDetail)
+@router.get("/{employee_id}")
 async def get_employee(
     employee_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """Get employee detail with worksite assignments."""
+    """Get employee detail."""
+    # TODO: providers.employees.get_by_id(employee_id)
     pass
 
 
-@router.patch("/{employee_id}", response_model=EmployeeResponse)
+@router.patch("/{employee_id}")
 async def update_employee(
     employee_id: str,
-    updates: EmployeeUpdate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    updates: dict,
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
     """Update employee info."""
+    # TODO: providers.employees.update(employee_id, updates)
     pass
 
 
 @router.delete("/{employee_id}", status_code=204)
 async def deactivate_employee(
     employee_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
     """Deactivate an employee (soft delete)."""
-    # TODO: Check if employee is sole primary contact anywhere
+    # TODO: providers.employees.deactivate(employee_id)
     pass

@@ -1,106 +1,98 @@
 """
 Router — Invoices
 
-Submit invoices per workgroup, AI validation, approval routing, payment.
-Key rules: no double-billing, cumulative ≤ workgroup budget, site presence verified.
+Contractor invoice submission, AI validation, owner approval.
+Submit triggers invoice_worker (10-check pipeline) via Pattern 2 (async).
+
+All database access goes through IInvoiceRepository via ProviderRegistry.
 """
 
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from app.dependencies import get_db, get_current_user, get_current_worker
-from app.models.invoice import (
-    InvoiceCreate, InvoiceApproval,
-    InvoiceResponse, InvoiceValidationResult,
-)
+from app.dependencies import get_invoice_repo
+from app.db.interfaces import IInvoiceRepository
+
+# Dev org_id from seed data — replace with auth when ready
+DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[InvoiceResponse])
+@router.get("/")
 async def list_invoices(
-    workgroup_id: Optional[str] = Query(None),
-    contractor_id: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    workgroup_id: Optional[str] = Query(None, description="Filter by workgroup"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    # user=Depends(get_current_user),
+    repo: IInvoiceRepository = Depends(get_invoice_repo),
 ):
-    """List invoices with optional filters."""
+    """List invoices for the organization, with optional filters."""
+    # TODO: repo.list_by_org(org_id) or repo.list_by_workgroup(workgroup_id)
     return []
 
 
-@router.post("/", response_model=InvoiceResponse, status_code=201)
+@router.post("/", status_code=202)
 async def submit_invoice(
-    invoice: InvoiceCreate,
-    worker=Depends(get_current_worker),
-    db=Depends(get_db),
+    data: dict,
+    # worker=Depends(get_current_worker),  # Contractor auth
+    repo: IInvoiceRepository = Depends(get_invoice_repo),
 ):
     """
-    Submit an invoice for a workgroup.
-    
-    Contractor selects completed jobs → bundles into invoice.
-    Triggers AI validation pipeline (10-point checklist).
+    Contractor submits an invoice.
+    Pattern 2 (async): create record + fire invoice_worker.delay().
+    Returns 202 Accepted — validation happens in background.
     """
-    # TODO: Validate workgroup belongs to worker's contractor
-    # TODO: Calculate amount from line items
-    # TODO: Create invoice record (status: 'submitted')
-    # TODO: Link submitted_by_worker
-    # TODO: Trigger AI validation (Step Function or async)
+    # TODO: invoice = await repo.create(data, status='submitted')
+    # TODO: validate_invoice.delay(str(invoice['id']))
+    # return {'id': invoice['id'], 'status': 'submitted'}
     pass
 
 
-@router.get("/{invoice_id}", response_model=InvoiceResponse)
+@router.get("/{invoice_id}")
 async def get_invoice(
     invoice_id: str,
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IInvoiceRepository = Depends(get_invoice_repo),
 ):
-    """Get invoice details."""
+    """Get invoice detail with AI validation flags."""
+    # TODO: repo.get_by_id(invoice_id)
     pass
 
 
-@router.get("/{invoice_id}/validation", response_model=InvoiceValidationResult)
-async def get_validation_result(
+@router.post("/{invoice_id}/approve")
+async def approve_invoice(
     invoice_id: str,
-    db=Depends(get_db),
-):
-    """Get the AI validation result for an invoice."""
-    # TODO: Return ai_flags and validation details
-    pass
-
-
-@router.post("/{invoice_id}/approve", response_model=InvoiceResponse)
-async def approve_or_reject_invoice(
-    invoice_id: str,
-    decision: InvoiceApproval,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IInvoiceRepository = Depends(get_invoice_repo),
 ):
     """
-    Approve, reject, or query an invoice.
-    
-    Approve → trigger payment (QuickBooks/Xero), update job statuses
-    Reject → notify contractor with reason
-    Query → send question to contractor via messaging
+    Owner approves an invoice.
+    Pattern 2 (async): update status + fire notification_worker.delay().
     """
-    # TODO: Validate user is authorized approver
-    # TODO: Handle approve/reject/query logic
-    # TODO: If approved → trigger payment, update jobs to 'paid'
-    # TODO: Check if all jobs invoiced+paid → workgroup complete
-    # TODO: Cascade: worksite complete? → project complete?
+    # TODO: repo.update_status(invoice_id, 'approved')
+    # TODO: notification_worker.delay('invoice_approved', invoice_id, {...})
     pass
 
 
-# ── Workgroup Invoice Summary ─────────────────────────
+@router.post("/{invoice_id}/reject")
+async def reject_invoice(
+    invoice_id: str,
+    data: dict,
+    # user=Depends(get_current_user),
+    repo: IInvoiceRepository = Depends(get_invoice_repo),
+):
+    """Owner rejects an invoice with reason."""
+    # TODO: repo.update_status(invoice_id, 'rejected', reason=data.get('reason'))
+    # TODO: notification_worker.delay('invoice_rejected', invoice_id, {...})
+    pass
+
 
 @router.get("/workgroup/{workgroup_id}/summary")
-async def workgroup_invoice_summary(
+async def get_workgroup_invoice_summary(
     workgroup_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IInvoiceRepository = Depends(get_invoice_repo),
 ):
-    """
-    Invoice summary for a workgroup: total invoiced, paid, remaining.
-    Uses the workgroup_invoice_summary view.
-    """
-    # TODO: Query workgroup_invoice_summary view
+    """Get invoice summary for a workgroup: totals, pipeline counts."""
+    # TODO: repo.get_cumulative_total(workgroup_id)
     return {}

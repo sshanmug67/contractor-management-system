@@ -1,79 +1,75 @@
 """
 Router — Uploads
 
-File and photo uploads per workgroup/job.
-Photos include geo-tag verification (Layer 2 of double-proof system).
-AI processes: classify, analyze, extract EXIF, verify geo-fence.
+Photo and document uploads (progress photos, receipts, contracts).
+Upload triggers geo_worker for EXIF/GPS verification (Pattern 2 async).
+
+Database access goes through ProviderRegistry.
+TODO: Add IUploadRepository to app/db/interfaces/__init__.py
+      and create get_upload_repo in dependencies.py,
+      then update this router to use the typed dependency.
 """
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File
 from typing import Optional
 
-from app.dependencies import get_db, get_current_user, get_current_worker
-from app.models.message import UploadCreate, UploadResponse
+from app.dependencies import get_providers
+from app.providers import ProviderRegistry
+
+# Dev org_id from seed data — replace with auth when ready
+DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[UploadResponse])
-async def list_uploads(
-    workgroup_id: Optional[str] = Query(None),
+@router.post("/", status_code=202)
+async def upload_file(
+    file: UploadFile = File(...),
     job_id: Optional[str] = Query(None),
-    file_type: Optional[str] = Query(None),
-    db=Depends(get_db),
+    workgroup_id: Optional[str] = Query(None),
+    upload_type: str = Query("progress_photo", description="Type: progress_photo, receipt, contract, before_after"),
+    # worker=Depends(get_current_worker),  # or get_current_user
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """List uploads with optional filters."""
+    """
+    Upload a photo or document.
+    Pattern 2 (async): save metadata + fire geo_worker.delay().
+    """
+    # TODO: Upload file to StorageProvider (providers.storage)
+    # TODO: Create upload record via providers.uploads.create(...)
+    # TODO: geo_worker.delay(upload_id) for EXIF/GPS verification
+    # return {'id': upload_id, 'status': 'processing'}
+    pass
+
+
+@router.get("/job/{job_id}")
+async def list_job_uploads(
+    job_id: str,
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
+):
+    """List all uploads for a specific job."""
+    # TODO: providers.uploads.list_by_job(job_id)
     return []
 
 
-@router.post("/", response_model=UploadResponse, status_code=201)
-async def upload_file(
-    file: UploadFile = File(...),
-    workgroup_id: str = Form(...),
-    job_id: Optional[str] = Form(None),
-    geo_latitude: Optional[float] = Form(None),
-    geo_longitude: Optional[float] = Form(None),
-    worker=Depends(get_current_worker),
-    db=Depends(get_db),
+@router.get("/workgroup/{workgroup_id}")
+async def list_workgroup_uploads(
+    workgroup_id: str,
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """
-    Upload a file/photo for a workgroup or job.
-    
-    For photos:
-    - Extract EXIF (GPS, timestamp, device)
-    - Verify GPS within worksite geo-fence
-    - Cross-reference with check-in location
-    - AI classify: progress/completion/damage/before/after
-    
-    For receipts/invoices:
-    - OCR → extract data
-    - Match to job/workgroup budget
-    
-    Files stored in Supabase Storage.
-    """
-    # TODO: Upload file to Supabase Storage
-    # TODO: Extract EXIF data from photos
-    # TODO: Geo-verify if lat/lng provided
-    # TODO: Create upload record
-    # TODO: Trigger AI processing async
-    pass
+    """List all uploads for a workgroup."""
+    # TODO: providers.uploads.list_by_workgroup(workgroup_id)
+    return []
 
 
-@router.get("/{upload_id}", response_model=UploadResponse)
+@router.get("/{upload_id}")
 async def get_upload(
     upload_id: str,
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """Get upload details including AI analysis."""
-    pass
-
-
-@router.delete("/{upload_id}", status_code=204)
-async def delete_upload(
-    upload_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    """Delete an upload (owner only)."""
-    # TODO: Remove from Supabase Storage + DB record
+    """Get upload detail with geo-verification status and AI classification."""
+    # TODO: providers.uploads.get_by_id(upload_id)
     pass

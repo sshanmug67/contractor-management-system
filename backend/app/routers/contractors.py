@@ -1,125 +1,121 @@
 """
 Router — Contractors
 
-Manage the contractor pool for an organization.
-CRUD + skills search + verification status + performance.
+Manage contractor companies, their workers, and verifications.
+Contractor pool for allocation and scoring.
+
+All database access goes through IContractorRepository via ProviderRegistry.
 """
 
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from app.dependencies import get_db, get_current_user
-from app.models.contractor import (
-    ContractorCreate, ContractorUpdate,
-    ContractorResponse, ContractorDetail,
-)
-from app.models.worker import WorkerResponse, WorkerActivity
+from app.dependencies import get_contractor_repo
+from app.db.interfaces import IContractorRepository
+
+# Dev org_id from seed data — replace with auth when ready
+DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[ContractorResponse])
+@router.get("/")
 async def list_contractors(
-    skills: Optional[str] = Query(None, description="Comma-separated skill filter"),
-    is_active: Optional[bool] = Query(None),
-    search: Optional[str] = Query(None, description="Search by company name"),
-    skip: int = 0,
-    limit: int = 20,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    trade: Optional[str] = Query(None, description="Filter by trade"),
+    status: Optional[str] = Query(None, description="Filter by verification status"),
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
 ):
     """List contractors in the organization's pool."""
-    # TODO: Query contractors WHERE org_id, apply filters
-    # TODO: Skills filter uses GIN index on skills array
+    # TODO: repo.list_by_org(org_id)
     return []
 
 
-@router.post("/", response_model=ContractorResponse, status_code=201)
+@router.post("/", status_code=201)
 async def create_contractor(
-    contractor: ContractorCreate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    data: dict,
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
 ):
-    """Register a new contractor company."""
-    # TODO: Insert contractor with org_id from user
-    # TODO: Trigger initial verification check
+    """Add a contractor to the pool."""
+    # TODO: repo.create(org_id, data)
     pass
 
 
-@router.get("/{contractor_id}", response_model=ContractorDetail)
+@router.get("/{contractor_id}")
 async def get_contractor(
     contractor_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
 ):
-    """Get full contractor detail with workers, workgroups, verifications."""
+    """Get contractor detail with workers and verification history."""
+    # TODO: repo.get_by_id(contractor_id)
     pass
 
 
-@router.patch("/{contractor_id}", response_model=ContractorResponse)
+@router.patch("/{contractor_id}")
 async def update_contractor(
     contractor_id: str,
-    updates: ContractorUpdate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    updates: dict,
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
 ):
-    """Update contractor details."""
+    """Update contractor info."""
+    # TODO: repo.update(contractor_id, updates)
     pass
 
 
 @router.delete("/{contractor_id}", status_code=204)
-async def deactivate_contractor(
+async def delete_contractor(
     contractor_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
 ):
-    """Deactivate a contractor (soft delete — sets is_active=False)."""
+    """Remove a contractor from the pool."""
+    # TODO: repo.delete(contractor_id)
     pass
 
 
-# ── Workers (Read-only from business side) ────────────
-
-@router.get("/{contractor_id}/workers", response_model=list[WorkerResponse])
-async def list_workers(
+@router.get("/{contractor_id}/workers")
+async def list_contractor_workers(
     contractor_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
 ):
-    """List self-identified workers for a contractor company."""
+    """List workers employed by this contractor company."""
+    # TODO: repo.get_workers(contractor_id)
     return []
 
 
-@router.get("/{contractor_id}/workers/{worker_id}/activity", response_model=WorkerActivity)
-async def get_worker_activity(
+@router.post("/{contractor_id}/workers", status_code=201)
+async def add_contractor_worker(
     contractor_id: str,
-    worker_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    data: dict,
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
 ):
-    """Get activity summary for a specific worker."""
-    pass
-
-
-# ── Verification ──────────────────────────────────────
-
-@router.post("/{contractor_id}/verify")
-async def trigger_verification(
-    contractor_id: str,
-    verification_type: str = Query(..., description="license|insurance|bbb"),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    """Trigger an external verification check for a contractor."""
-    # TODO: Call services/contractor_verifier.py
-    # TODO: Create contractor_verifications record
+    """Add a worker to this contractor company."""
+    # TODO: repo.upsert_worker(contractor_id, data)
     pass
 
 
 @router.get("/{contractor_id}/verifications")
 async def list_verifications(
     contractor_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
 ):
-    """List all verification records for a contractor."""
+    """Get verification history for this contractor."""
+    # TODO: repo.get_verifications(contractor_id)
+    return []
+
+
+@router.get("/search/by-skills")
+async def search_by_skills(
+    skills: str = Query(..., description="Comma-separated skills/trades"),
+    # user=Depends(get_current_user),
+    repo: IContractorRepository = Depends(get_contractor_repo),
+):
+    """Search contractors by skills/trades for allocation."""
+    # TODO: repo.search_by_skills(org_id, skills.split(','))
     return []

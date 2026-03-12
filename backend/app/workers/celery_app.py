@@ -17,7 +17,7 @@ import os
 import logging
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_init, task_prerun, task_postrun, task_failure, beat_init
+from celery.signals import worker_init, task_prerun, task_postrun, task_failure, beat_init, after_setup_logger
 
 from app.cache.redis_config import get_redis_config
 
@@ -163,6 +163,11 @@ def on_beat_init(**kwargs):
         schedule = entry.get("schedule")
         _log("BEAT", f"  Scheduled: {name} — every {schedule}")
 
+
+@after_setup_logger.connect
+def on_after_setup_logger(**kwargs):
+    """Re-attach our file handler after Celery configures logging."""
+    _get_celery_logger()
 
 # ── Task Lifecycle ────────────────────────────────────────
 

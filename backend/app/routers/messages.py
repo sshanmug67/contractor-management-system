@@ -1,53 +1,59 @@
 """
 Router — Messages
 
-Per-workgroup messaging between contractor workers and business team.
-AI processes every message for classification, sentiment, action items.
+Chat messaging within workgroup context.
+Business owner and contractor can exchange messages per workgroup.
+
+Database access goes through ProviderRegistry.
+TODO: Add IMessageRepository to app/db/interfaces/__init__.py
+      and create get_message_repo in dependencies.py,
+      then update this router to use the typed dependency.
 """
 
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from app.dependencies import get_db, get_current_user, get_current_worker
-from app.models.message import MessageCreate, MessageResponse
+from app.dependencies import get_providers
+from app.providers import ProviderRegistry
+
+# Dev org_id from seed data — replace with auth when ready
+DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[MessageResponse])
+@router.get("/workgroup/{workgroup_id}")
 async def list_messages(
-    workgroup_id: str = Query(...),
-    before: Optional[str] = Query(None, description="Cursor: messages before this timestamp"),
-    limit: int = Query(50, ge=1, le=100),
-    db=Depends(get_db),
+    workgroup_id: str,
+    limit: int = Query(50, description="Number of messages to return"),
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """List messages for a workgroup (paginated, newest first)."""
-    # TODO: Query messages WHERE workgroup_id, ordered by created_at DESC
-    # TODO: Join worker name for display
+    """List messages for a workgroup thread."""
+    # TODO: providers.messages.list_by_workgroup(workgroup_id, limit)
     return []
 
 
-@router.post("/", response_model=MessageResponse, status_code=201)
-async def send_message_owner(
-    message: MessageCreate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+@router.post("/workgroup/{workgroup_id}", status_code=201)
+async def send_message(
+    workgroup_id: str,
+    data: dict,
+    # user=Depends(get_current_user),  # or get_current_worker for contractor
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """Send a message as a business owner/employee."""
-    # TODO: Insert message with sender_type = 'owner' or 'employee'
-    # TODO: Trigger AI processing (classify, sentiment, action items)
-    # TODO: Push via Supabase Realtime
+    """
+    Send a message in a workgroup thread.
+    Pattern 1 (sync): create record, Realtime handles push to recipient.
+    """
+    # TODO: providers.messages.create(workgroup_id, sender_id, data)
     pass
 
 
-@router.post("/contractor", response_model=MessageResponse, status_code=201)
-async def send_message_worker(
-    message: MessageCreate,
-    worker=Depends(get_current_worker),
-    db=Depends(get_db),
+@router.get("/unread")
+async def get_unread_counts(
+    # user=Depends(get_current_user),
+    providers: ProviderRegistry = Depends(get_providers),
 ):
-    """Send a message as a contractor worker."""
-    # TODO: Insert message with sender_type = 'worker', worker_id
-    # TODO: Trigger AI processing
-    # TODO: Push via Supabase Realtime
-    pass
+    """Get unread message counts per workgroup for the current user."""
+    # TODO: providers.messages.get_unread_count(user_id)
+    return {}

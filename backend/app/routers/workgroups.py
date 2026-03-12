@@ -1,172 +1,151 @@
 """
 Router — Workgroups
 
-CRUD + contractor allocation + accept/reject + dependency management.
-Core of the CMS workflow — this is where contractors get assigned.
+CRUD for workgroups within a worksite.
+A workgroup is a trade assignment (e.g., "Roofing at 123 Main St").
+Allocation and dependency management included.
+
+All database access goes through IWorkgroupRepository via ProviderRegistry.
 """
 
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from app.dependencies import get_db, get_current_user, get_current_worker
-from app.models.workgroup import (
-    WorkgroupCreate, WorkgroupUpdate, WorkgroupAllocate,
-    WorkgroupAcceptReject, WorkgroupDependencyCreate,
-    WorkgroupResponse, WorkgroupDetail, WorkgroupDependencyResponse,
-)
-from app.models.contractor import ContractorScoreResult
+from app.dependencies import get_workgroup_repo
+from app.db.interfaces import IWorkgroupRepository
+
+# Dev org_id from seed data — replace with auth when ready
+DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[WorkgroupResponse])
+@router.get("/")
 async def list_workgroups(
-    worksite_id: Optional[str] = Query(None),
-    contractor_id: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    worksite_id: Optional[str] = Query(None, description="Filter by worksite"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
-    """List workgroups with optional filters."""
+    """List workgroups, optionally filtered by worksite or status."""
+    # TODO: repo.list_by_worksite(worksite_id) or repo.list_by_org(org_id)
     return []
 
 
-@router.post("/", response_model=WorkgroupResponse, status_code=201)
+@router.post("/", status_code=201)
 async def create_workgroup(
-    workgroup: WorkgroupCreate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    data: dict,
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
-    """Create a workgroup within a worksite."""
-    # TODO: Validate worksite belongs to user's org
-    # TODO: Insert workgroup
-    # TODO: AI suggests job breakdown + budget allocation
+    """Create a new workgroup within a worksite."""
+    # TODO: repo.create(data)
     pass
 
 
-@router.get("/{workgroup_id}", response_model=WorkgroupDetail)
+@router.get("/{workgroup_id}")
 async def get_workgroup(
     workgroup_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
-    """Get full workgroup detail with jobs, invoices, and site presence."""
+    """Get workgroup detail with jobs and dependency info."""
+    # TODO: repo.get_by_id(workgroup_id)
     pass
 
 
-@router.patch("/{workgroup_id}", response_model=WorkgroupResponse)
+@router.patch("/{workgroup_id}")
 async def update_workgroup(
     workgroup_id: str,
-    updates: WorkgroupUpdate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    updates: dict,
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
     """Update workgroup fields."""
+    # TODO: repo.update(workgroup_id, updates)
     pass
 
 
 @router.delete("/{workgroup_id}", status_code=204)
 async def delete_workgroup(
     workgroup_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
-    """Delete a workgroup (only if draft, no active work)."""
+    """Delete a workgroup (only if draft, no active jobs)."""
+    # TODO: repo.delete(workgroup_id)
     pass
 
 
-# ── Contractor Allocation ─────────────────────────────
-
-@router.post("/{workgroup_id}/allocate", response_model=WorkgroupResponse)
-async def allocate_contractor(
+@router.post("/{workgroup_id}/allocate", status_code=200)
+async def allocate_workgroup(
     workgroup_id: str,
-    allocation: WorkgroupAllocate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    data: dict,
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
     """
-    Allocate a contractor to this workgroup.
-    
-    Triggers:
-    - QR token generation
-    - SMS + Email notification to contractor (with QR code/link)
-    - Status → 'pending'
+    Allocate a workgroup to a contractor.
+    Pattern 2 (async): immediate status write + fire qr_worker.delay().
     """
-    # TODO: Validate contractor exists and is active
-    # TODO: Update workgroup.contractor_id
-    # TODO: Generate QR token (services/qr_generator.py)
-    # TODO: Send notification (services/notification.py)
-    # TODO: Set status = 'pending'
+    # TODO: repo.update_status(workgroup_id, 'allocated')
+    # TODO: qr_worker.delay(workgroup_id, contractor_id)
     pass
 
 
-@router.get("/{workgroup_id}/recommend", response_model=list[ContractorScoreResult])
-async def recommend_contractors(
+@router.post("/{workgroup_id}/accept")
+async def accept_workgroup(
     workgroup_id: str,
-    limit: int = Query(5, ge=1, le=20),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # worker=Depends(get_current_worker),  # Contractor auth
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
-    """AI-scored contractor recommendations for this workgroup."""
-    # TODO: Call services/allocation.py → score_contractors()
-    # TODO: Return ranked list with scores per factor
+    """Contractor accepts workgroup allocation."""
+    # TODO: repo.update_status(workgroup_id, 'accepted')
+    # TODO: notification_worker.delay('contractor_accepted', ...)
+    pass
+
+
+@router.post("/{workgroup_id}/reject")
+async def reject_workgroup(
+    workgroup_id: str,
+    # worker=Depends(get_current_worker),  # Contractor auth
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
+):
+    """Contractor rejects workgroup allocation."""
+    # TODO: repo.update_status(workgroup_id, 'rejected')
+    # TODO: notification_worker.delay('contractor_rejected', ...)
+    pass
+
+
+@router.get("/{workgroup_id}/dependencies")
+async def get_dependencies(
+    workgroup_id: str,
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
+):
+    """Get dependency chain for this workgroup."""
+    # TODO: repo.get_dependencies(workgroup_id)
     return []
 
 
-# ── Accept / Reject (Contractor Side) ─────────────────
-
-@router.post("/{workgroup_id}/respond", response_model=WorkgroupResponse)
-async def accept_or_reject(
-    workgroup_id: str,
-    response: WorkgroupAcceptReject,
-    worker=Depends(get_current_worker),
-    db=Depends(get_db),
-):
-    """
-    Contractor accepts or rejects a workgroup assignment.
-    
-    Accept → status: 'in_progress', notify owner + contacts, start monitoring
-    Reject → status: 'rejected', invalidate QR, notify owner, suggest alternative
-    """
-    # TODO: Validate worker belongs to this workgroup's contractor
-    # TODO: Record accepted_by / accepted_at
-    # TODO: Handle accept vs reject logic
-    # TODO: Trigger notifications
-    pass
-
-
-# ── Dependencies ──────────────────────────────────────
-
-@router.post("/{workgroup_id}/dependencies", response_model=WorkgroupDependencyResponse, status_code=201)
+@router.post("/{workgroup_id}/dependencies", status_code=201)
 async def add_dependency(
     workgroup_id: str,
-    dep: WorkgroupDependencyCreate,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    data: dict,
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
-    """Add a dependency: this workgroup depends on another workgroup."""
-    # TODO: Validate both workgroups exist (can be cross-worksite)
-    # TODO: Prevent circular dependencies
-    # TODO: Insert into workgroup_dependencies
+    """Add a dependency (this workgroup depends on another)."""
+    # TODO: repo.add_dependency(workgroup_id, data['depends_on_workgroup_id'])
     pass
 
 
-@router.get("/{workgroup_id}/dependencies", response_model=list[WorkgroupDependencyResponse])
-async def list_dependencies(
+@router.get("/{workgroup_id}/progress")
+async def get_workgroup_progress(
     workgroup_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
+    # user=Depends(get_current_user),
+    repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
-    """List all dependencies for a workgroup."""
-    return []
-
-
-@router.delete("/{workgroup_id}/dependencies/{dependency_id}", status_code=204)
-async def remove_dependency(
-    workgroup_id: str,
-    dependency_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    """Remove a workgroup dependency."""
-    pass
+    """Get progress breakdown: jobs completion status."""
+    # TODO: repo.get_progress(workgroup_id)
+    return {}
