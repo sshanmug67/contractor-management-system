@@ -11,6 +11,7 @@ venv/
 dist/
 build/
 
+
 # Environment
 .env
 .env.local
@@ -38,3 +39,4 @@ htmlcov/
 
 # Logs
 *.log
+backend/logs/

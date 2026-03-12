@@ -5,6 +5,12 @@ Contractor Management System API.
 Architecture: Project → Worksite → Workgroup → Job
 """
 
+from app.config.logging_config import setup_logging, shutdown_logging
+
+# Initialize logging BEFORE get_settings()
+setup_logging(log_file_name="cms")
+
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -82,6 +88,4 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    """Cleanup on shutdown."""
-    # TODO: Close connections gracefully
-    pass
+    shutdown_logging()

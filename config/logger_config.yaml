@@ -1,0 +1,84 @@
+# config/logger_config.yaml
+# ============================================================
+# CMS — Logging Configuration
+#
+# Controls RotatingFileHandler for all log files.
+# Values flow: this YAML → logging_config.py
+#
+# Root log files: cms_all_messages.log, cms_warnings.log, cms_errors.log
+# Special log files: individual process logs (dashboard_queries.log, etc.)
+#
+# Disk usage per file = max_bytes_mb × (1 + backup_count)
+#   Root:    5 MB × 4 files = 20 MB max per log file
+#   Special: 5 MB × 4 files = 20 MB max per special log file
+# ============================================================
+
+log_rotation:
+  root:
+    max_bytes_mb: 5        # 5 MB per root log file
+    backup_count: 3        # 3 backups (e.g., cms_all_messages.log.1, .2, .3)
+  special:
+    max_bytes_mb: 5        # 5 MB per special log file
+    backup_count: 3        # 3 backups
+
+# ============================================================
+# SPECIAL LOGGER CONTROL
+# Centralized on/off for dedicated log files.
+# Set to false to disable specific loggers.
+# ============================================================
+
+special_loggers:
+  # ── API Layer ──────────────────────────────────
+  api_requests: true
+  api_responses: true
+
+  # ── Dashboard ──────────────────────────────────
+  dashboard_queries: true
+
+  # ── Project / Worksite / Workgroup ─────────────
+  project_operations: true
+  worksite_operations: true
+  workgroup_operations: true
+  job_operations: true
+
+  # ── Invoices & Payments ────────────────────────
+  invoice_processing: true
+  invoice_validation: true
+
+  # ── Contractor Management ──────────────────────
+  contractor_allocation: true
+  contractor_verification: true
+
+  # ── AI Agent ───────────────────────────────────
+  ai_agent: true
+  ai_reminders: true
+  ai_insights: true
+  document_ocr: true
+
+  # ── Notifications ──────────────────────────────
+  notifications_sms: true
+  notifications_email: true
+
+  # ── Auth & Security ────────────────────────────
+  auth_owner: true
+  auth_qr: true
+  auth_worker_sessions: true
+
+  # ── Background Workers ─────────────────────────
+  worker_reminders: true
+  worker_progress_recalc: true
+  worker_overdue_check: true
+
+  # ── GPS & Site Presence ────────────────────────
+  geo_verification: true
+  site_checkins: true
+
+  # ── Performance / Debug ────────────────────────
+  slow_queries: true
+  database_queries: false    # Set to false in production
+  dependency_engine: true
+  progress_calculator: true
+
+  # ── External API calls ─────────────────────────
+  supabase_calls: false      # Very verbose — disable in production
+  claude_api_calls: true

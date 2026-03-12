@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { useDashboard } from "@/hooks/useDashboard";
-import { transformDashboardData } from "@/hooks/dashboardBridge";
-import type { UIDashboard, UIWorksite, UIWorkgroup, UIJob } from "@/hooks/dashboardBridge";
+import { useDashboard } from '@/hooks/useDashboard';
+import { transformDashboardData } from '@/hooks/dashboardBridge';
+import type { UIDashboard, UIWorksite, UIWorkgroup, UIJob } from '@/hooks/dashboardBridge';
+
 
 /* ═══════════════════ ICONS ═══════════════════ */
 const I = ({d,size=16,color="currentColor",sw=2,...rest}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" {...rest}>{typeof d==='string'?<path d={d}/>:d}</svg>;
@@ -30,21 +31,20 @@ const PaintI = p=><I {...p} d={<><path d="M18.37 2.63 14 7l-1.59-1.59a2 2 0 0 0-
 const WindI = p=><I {...p} d={<><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/></>}/>;
 const BuildI = p=><I {...p} d={<><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M16 6h.01M12 6h.01M12 10h.01M12 14h.01M16 10h.01M16 14h.01M8 10h.01M8 14h.01"/></>}/>;
 
-/* ═══════════════════ DISPLAY CONSTANTS ═══════════════════ */
+
+
 const SC=[
   {gradient:"linear-gradient(135deg,#1e3a5f,#2563eb)",accent:"#2563eb",bg:"#eff6ff",ring:"#bfdbfe",text:"#1e3a5f"},
   {gradient:"linear-gradient(135deg,#7c2d12,#ea580c)",accent:"#ea580c",bg:"#fff7ed",ring:"#fed7aa",text:"#7c2d12"},
   {gradient:"linear-gradient(135deg,#4c1d95,#7c3aed)",accent:"#7c3aed",bg:"#f5f3ff",ring:"#ddd6fe",text:"#4c1d95"},
-  {gradient:"linear-gradient(135deg,#065f46,#059669)",accent:"#059669",bg:"#ecfdf5",ring:"#a7f3d0",text:"#065f46"},
-  {gradient:"linear-gradient(135deg,#991b1b,#dc2626)",accent:"#dc2626",bg:"#fef2f2",ring:"#fecaca",text:"#991b1b"},
 ];
 const P={done:{bg:"#ecfdf5",fg:"#059669",fill:"#10b981",ring:"#a7f3d0",grad:"linear-gradient(135deg,#10b981,#34d399)"},active:{bg:"#eff6ff",fg:"#2563eb",fill:"#3b82f6",ring:"#bfdbfe",grad:"linear-gradient(135deg,#3b82f6,#60a5fa)"},pending:{bg:"#fffbeb",fg:"#d97706",fill:"#f59e0b",ring:"#fde68a",grad:"linear-gradient(135deg,#f59e0b,#fbbf24)"},draft:{bg:"#f1f5f9",fg:"#64748b",fill:"#94a3b8",ring:"#cbd5e1",grad:"linear-gradient(135deg,#94a3b8,#cbd5e1)"},ns:{bg:"#f8fafc",fg:"#94a3b8",fill:"#cbd5e1",ring:"#e2e8f0",grad:"linear-gradient(135deg,#cbd5e1,#e2e8f0)"},crit:{bg:"#fef2f2",fg:"#dc2626",ring:"#fecaca",grad:"linear-gradient(135deg,#ef4444,#f87171)"}};
 const SM={complete:{label:"Done",p:P.done},in_progress:{label:"Active",p:P.active},pending:{label:"Pending",p:P.pending},draft:{label:"Draft",p:P.draft},not_started:{label:"Queued",p:P.ns}};
 const TI={Roofing:{Icon:HammerI,c:"#d97706",bg:"linear-gradient(135deg,#fef3c7,#fde68a)",ring:"#fbbf24"},Electrical:{Icon:PlugI,c:"#2563eb",bg:"linear-gradient(135deg,#dbeafe,#bfdbfe)",ring:"#3b82f6"},Plumbing:{Icon:WrenchI,c:"#0284c7",bg:"linear-gradient(135deg,#e0f2fe,#bae6fd)",ring:"#0ea5e9"},Painting:{Icon:PaintI,c:"#db2777",bg:"linear-gradient(135deg,#fce7f3,#fbcfe8)",ring:"#ec4899"},HVAC:{Icon:WindI,c:"#0d9488",bg:"linear-gradient(135deg,#ccfbf1,#99f6e4)",ring:"#14b8a6"},Flooring:{Icon:BuildI,c:"#7c3aed",bg:"linear-gradient(135deg,#ede9fe,#ddd6fe)",ring:"#8b5cf6"}};
 const tS=new Date("2026-03-01").getTime(),tE=new Date("2026-06-01").getTime(),tR=tE-tS;
-const d2p=(dt:string)=>Math.max(0,Math.min(100,((new Date(dt).getTime()-tS)/tR)*100));
+const d2p=d=>Math.max(0,Math.min(100,((new Date(d).getTime()-tS)/tR)*100));
 const mos=["Mar","Apr","May"];
-const fmt=(n:number)=>n>=1000?`$${(n/1000).toFixed(n%1000===0?0:1)}K`:`$${n}`;
+const fmt=n=>n>=1000?`$${(n/1000).toFixed(n%1000===0?0:1)}K`:`$${n}`;
 
 const css=`
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800;9..40,900&display=swap');
@@ -57,21 +57,20 @@ const css=`
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes drawerIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
 @keyframes scaleIn{from{opacity:0;transform:scale(0.97)}to{opacity:1;transform:scale(1)}}
-@keyframes spin{to{transform:rotate(360deg)}}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(148,163,184,0.25);border-radius:4px}
 `;
 
-const Badge=({status}:{status:string})=>{const m=SM[status]||SM.draft;return<span style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,fontSize:9,fontWeight:800,letterSpacing:"0.08em",textTransform:"uppercase",background:m.p.grad,color:"#fff"}}>{m.label}</span>};
-const BudgetBar=({spent,invoiced,total,h=5}:{spent:number;invoiced:number;total:number;h?:number})=>{const t=total||1;const sp=(spent/t)*100,ip=(invoiced/t)*100;return<div style={{height:h,borderRadius:10,overflow:"hidden",display:"flex",background:"rgba(148,163,184,0.15)"}}>{sp>0&&<div style={{height:"100%",width:`${sp}%`,background:P.done.grad,transition:"width .6s"}}/>}{ip>0&&<div style={{height:"100%",width:`${ip}%`,background:P.pending.grad,transition:"width .6s"}}/>}</div>};
-const Bar=({pct,grad}:{pct:number;grad:string})=><div style={{height:4,borderRadius:10,overflow:"hidden",background:"rgba(148,163,184,0.15)"}}><div style={{height:"100%",borderRadius:10,width:`${Math.max(pct,pct>0?3:0)}%`,background:grad,transition:"width .6s"}}/></div>;
+const Badge=({status})=>{const m=SM[status]||SM.draft;return<span style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,fontSize:9,fontWeight:800,letterSpacing:"0.08em",textTransform:"uppercase",background:m.p.grad,color:"#fff"}}>{m.label}</span>};
+const BudgetBar=({spent,invoiced,total,h=5})=>{const sp=(spent/total)*100,ip=(invoiced/total)*100;return<div style={{height:h,borderRadius:10,overflow:"hidden",display:"flex",background:"rgba(148,163,184,0.15)"}}>{sp>0&&<div style={{height:"100%",width:`${sp}%`,background:P.done.grad,transition:"width .6s"}}/>}{ip>0&&<div style={{height:"100%",width:`${ip}%`,background:P.pending.grad,transition:"width .6s"}}/>}</div>};
+const Bar=({pct,grad})=><div style={{height:4,borderRadius:10,overflow:"hidden",background:"rgba(148,163,184,0.15)"}}><div style={{height:"100%",borderRadius:10,width:`${Math.max(pct,pct>0?3:0)}%`,background:grad,transition:"width .6s"}}/></div>;
 
 /* ═══════════════════ DRAWER ═══════════════════ */
-function WorkgroupDrawer({wg,allWg,onClose}:{wg:UIWorkgroup;allWg:UIWorkgroup[];onClose:()=>void}){
+function WorkgroupDrawer({wg,onClose}){
   const ti=TI[wg.trade]||{Icon:HammerI,c:"#6b7280",bg:"#f1f5f9"};const TradeIcon=ti.Icon;const sm=SM[wg.status]||SM.draft;
   const dn=wg.jobs.filter(j=>j.status==="complete").length,pc=wg.jobs.length>0?Math.round((dn/wg.jobs.length)*100):0;
   const spent=wg.jobs.filter(j=>j.paid).reduce((a,j)=>a+(j.invoiceAmount||0),0);
   const invoiced=wg.jobs.filter(j=>j.invoiced&&!j.paid).reduce((a,j)=>a+(j.invoiceAmount||0),0);
-  const ref=useRef<HTMLDivElement>(null);
+  const ref=useRef(null);
   return(
     <div ref={ref} onClick={e=>{if(e.target===ref.current)onClose()}} style={{position:"fixed",inset:0,zIndex:50,display:"flex",justifyContent:"flex-end",animation:"fadeIn .15s ease both"}}>
       <div style={{position:"absolute",inset:0,background:"rgba(15,23,42,0.28)",backdropFilter:"blur(3px)"}}/>
@@ -100,7 +99,7 @@ function WorkgroupDrawer({wg,allWg,onClose}:{wg:UIWorkgroup;allWg:UIWorkgroup[];
             <span style={{fontSize:10,fontWeight:800,color:sm.p.fg}}>{pc}% complete</span>
           </div>
           <div style={{display:"flex",gap:10,marginTop:6}}>
-            {wg.startDate&&<span style={{fontSize:10,color:"#94a3b8",display:"flex",alignItems:"center",gap:3}}><CalI size={10} color="#94a3b8"/>{new Date(wg.startDate).toLocaleDateString("en-US",{month:"short",day:"numeric"})} — {wg.endDate&&new Date(wg.endDate).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>}
+            <span style={{fontSize:10,color:"#94a3b8",display:"flex",alignItems:"center",gap:3}}><CalI size={10} color="#94a3b8"/>{new Date(wg.startDate).toLocaleDateString("en-US",{month:"short",day:"numeric"})} — {new Date(wg.endDate).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
             <span style={{fontSize:10,color:"#94a3b8",display:"flex",alignItems:"center",gap:3}}><ClockI size={10} color="#94a3b8"/>{wg.jobs.reduce((a,j)=>a+j.durationDays,0)} days</span>
           </div>
         </div>
@@ -137,7 +136,7 @@ function WorkgroupDrawer({wg,allWg,onClose}:{wg:UIWorkgroup;allWg:UIWorkgroup[];
             )})}
           </div>
           {wg.dependsOn&&<div style={{marginTop:10,padding:"7px 10px",borderRadius:10,background:P.pending.bg,border:`1.5px solid ${P.pending.ring}`,display:"flex",alignItems:"center",gap:6}}>
-            <ArrI size={12} color={P.pending.fg}/><span style={{fontSize:10,fontWeight:700,color:P.pending.fg}}>Blocked by {allWg.find(w=>w.id===wg.dependsOn)?.title||"unknown"}</span>
+            <ArrI size={12} color={P.pending.fg}/><span style={{fontSize:10,fontWeight:700,color:P.pending.fg}}>Blocked by {allWg.find(w=>w.id===wg.dependsOn)?.title}</span>
           </div>}
         </div>
       </div>
@@ -146,8 +145,8 @@ function WorkgroupDrawer({wg,allWg,onClose}:{wg:UIWorkgroup;allWg:UIWorkgroup[];
 }
 
 /* ═══════════════════ GANTT ═══════════════════ */
-function GanttView({d}:{d:UIDashboard}){
-  const[exp,setExp]=useState<string|null>(d.worksites[0]?.workgroups[0]?.id||null);
+function GanttView(){
+  const[exp,setExp]=useState("wg1");
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
       <div style={{flexShrink:0,display:"flex",borderBottom:"1.5px solid #e2e8f0"}}>
@@ -160,7 +159,7 @@ function GanttView({d}:{d:UIDashboard}){
         </div>
       </div>
       <div style={{flex:1,overflowY:"auto"}}>
-        {d.worksites.map((ws,wi)=>{const sc=SC[wi%SC.length];return(
+        {worksites.map((ws,wi)=>{const sc=SC[wi];return(
           <div key={ws.name} style={{animation:`fu .32s ${wi*70}ms both`}}>
             <div style={{display:"flex",alignItems:"center",borderBottom:"1.5px solid #e2e8f0",position:"sticky",top:0,zIndex:10}}>
               <div style={{width:200,flexShrink:0,padding:"6px 12px",display:"flex",alignItems:"center",gap:6,background:sc.gradient}}>
@@ -170,7 +169,7 @@ function GanttView({d}:{d:UIDashboard}){
             </div>
             {ws.workgroups.map((wg,wgi)=>{
               const ti=TI[wg.trade]||{Icon:HammerI,c:"#6b7280",bg:"#f1f5f9"};const TradeIcon=ti.Icon;const sm=SM[wg.status]||SM.draft;
-              const isE=exp===wg.id,s=wg.startDate?d2p(wg.startDate):0,e=wg.endDate?d2p(wg.endDate):s+5,w=Math.max(e-s,2);
+              const isE=exp===wg.id,s=d2p(wg.startDate),e=d2p(wg.endDate),w=Math.max(e-s,2);
               const dn=wg.jobs.filter(j=>j.status==="complete").length,pc=wg.jobs.length>0?(dn/wg.jobs.length)*100:0;
               return(
                 <div key={wg.id} style={{animation:`si .3s ${wi*70+wgi*45+60}ms both`}}>
@@ -192,7 +191,7 @@ function GanttView({d}:{d:UIDashboard}){
                     </div>
                   </div>
                   {isE&&wg.jobs.map((job,ji)=>{
-                    const jSm=SM[job.status]||SM.ns;const wS=wg.startDate?new Date(wg.startDate).getTime():tS;
+                    const jSm=SM[job.status]||SM.ns;const wS=new Date(wg.startDate).getTime();
                     const off=wg.jobs.slice(0,job.sequence-1).reduce((a,j)=>a+j.durationDays,0);
                     const jS=new Date(wS+off*864e5),jE=new Date(jS.getTime()+job.durationDays*864e5);
                     const jL=d2p(jS.toISOString().split("T")[0]),jR=d2p(jE.toISOString().split("T")[0]),jW=Math.max(jR-jL,1.2);
@@ -225,13 +224,12 @@ function GanttView({d}:{d:UIDashboard}){
 }
 
 /* ═══════════════════ CARDS ═══════════════════ */
-function CardView({onOpenDrawer,d}:{onOpenDrawer:(wg:UIWorkgroup)=>void;d:UIDashboard}){
+function CardView({onOpenDrawer}){
   const[activeSite,setActiveSite]=useState(0);
-  const ws=d.worksites[activeSite]||d.worksites[0]; const sc=SC[activeSite%SC.length];
-  const wsDone=ws?ws.workgroups.flatMap(wg=>wg.jobs).filter(j=>j.status==="complete").length:0;
-  const wsTotal=ws?ws.workgroups.flatMap(wg=>wg.jobs).length:0;
-  const wsSpent=ws?ws.workgroups.flatMap(wg=>wg.jobs).filter(j=>j.paid).reduce((a,j)=>a+(j.invoiceAmount||0),0):0;
-  const wsInv=ws?ws.workgroups.flatMap(wg=>wg.jobs).filter(j=>j.invoiced&&!j.paid).reduce((a,j)=>a+(j.invoiceAmount||0),0):0;
+  const ws=worksites[activeSite]; const sc=SC[activeSite];
+  const wsDone=ws.workgroups.flatMap(wg=>wg.jobs).filter(j=>j.status==="complete").length,wsTotal=ws.workgroups.flatMap(wg=>wg.jobs).length;
+  const wsSpent=ws.workgroups.flatMap(wg=>wg.jobs).filter(j=>j.paid).reduce((a,j)=>a+(j.invoiceAmount||0),0);
+  const wsInv=ws.workgroups.flatMap(wg=>wg.jobs).filter(j=>j.invoiced&&!j.paid).reduce((a,j)=>a+(j.invoiceAmount||0),0);
 
   return(
     <div style={{flex:1,overflowY:"auto",padding:14}}>
@@ -240,28 +238,30 @@ function CardView({onOpenDrawer,d}:{onOpenDrawer:(wg:UIWorkgroup)=>void;d:UIDash
         <div style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",padding:"12px 18px",color:"#fff"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <TrendI size={14} color="#94a3b8"/><span style={{fontSize:24,fontWeight:900,letterSpacing:"-0.02em"}}>{fmt(d.totalBudget)}</span><span style={{fontSize:12,color:"#64748b"}}>Total Budget</span>
+              <TrendI size={14} color="#94a3b8"/><span style={{fontSize:24,fontWeight:900,letterSpacing:"-0.02em"}}>{fmt(totalBudget)}</span><span style={{fontSize:12,color:"#64748b"}}>Total Budget</span>
             </div>
             <div style={{display:"flex",gap:14}}>
-              {[{l:"Paid",v:fmt(d.totalSpent),c:"#34d399",g:P.done.grad},{l:"Invoiced",v:fmt(d.totalInvoiced),c:"#fbbf24",g:P.pending.grad},{l:"Remaining",v:fmt(d.totalBudget-d.totalSpent-d.totalInvoiced),c:"#94a3b8",g:"#475569"}].map(x=>
-                <span key={x.l} style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:8,height:8,borderRadius:4,background:x.g}}/><span style={{fontSize:13,fontWeight:700,color:x.c}}>{x.v}</span><span style={{fontSize:11,color:"#64748b"}}>{x.l}</span></span>
+              {[{l:"Paid",v:fmt(totalSpent),c:"#34d399",d:P.done.grad},{l:"Invoiced",v:fmt(totalInvoiced),c:"#fbbf24",d:P.pending.grad},{l:"Remaining",v:fmt(totalBudget-totalSpent-totalInvoiced),c:"#94a3b8",d:"#475569"}].map(x=>
+                <span key={x.l} style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:8,height:8,borderRadius:4,background:x.d}}/><span style={{fontSize:13,fontWeight:700,color:x.c}}>{x.v}</span><span style={{fontSize:11,color:"#64748b"}}>{x.l}</span></span>
               )}
             </div>
           </div>
-          <BudgetBar spent={d.totalSpent} invoiced={d.totalInvoiced} total={d.totalBudget} h={6}/>
+          <BudgetBar spent={totalSpent} invoiced={totalInvoiced} total={totalBudget} h={6}/>
         </div>
       </div>
 
-      {/* Work Sites subtitle */}
+      {/* ── Work Sites subtitle + clickable site tabs ── */}
       <div style={{padding:"10px 4px 6px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <h2 style={{fontSize:13,fontWeight:800,color:"#475569",textTransform:"uppercase",letterSpacing:"0.1em",display:"flex",alignItems:"center",gap:6}}><MapPinI size={14} color="#64748b"/>Work Sites</h2>
-        <span style={{fontSize:11,color:"#94a3b8"}}>{d.worksites.length} sites · {d.allWg.length} workgroups · {d.jTotal} jobs</span>
+        <h2 style={{fontSize:13,fontWeight:800,color:"#475569",textTransform:"uppercase",letterSpacing:"0.1em",display:"flex",alignItems:"center",gap:6}}>
+          <MapPinI size={14} color="#64748b"/>Work Sites
+        </h2>
+        <span style={{fontSize:11,color:"#94a3b8"}}>{worksites.length} sites · {allWg.length} workgroups · {d.jTotal} jobs</span>
       </div>
 
       {/* Site Tabs */}
-      <div style={{display:"grid",gridTemplateColumns:`repeat(${d.worksites.length}, 1fr)`,gap:8,marginBottom:14}}>
-        {d.worksites.map((site,wi)=>{
-          const siteC=SC[wi%SC.length]; const isActive=wi===activeSite;
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${worksites.length}, 1fr)`,gap:8,marginBottom:14}}>
+        {worksites.map((site,wi)=>{
+          const siteC=SC[wi]; const isActive=wi===activeSite;
           const sS=site.workgroups.flatMap(wg=>wg.jobs).filter(j=>j.paid).reduce((a,j)=>a+(j.invoiceAmount||0),0);
           const sI=site.workgroups.flatMap(wg=>wg.jobs).filter(j=>j.invoiced&&!j.paid).reduce((a,j)=>a+(j.invoiceAmount||0),0);
           const sP=site.budget>0?Math.round(((sS+sI)/site.budget)*100):0;
@@ -269,7 +269,11 @@ function CardView({onOpenDrawer,d}:{onOpenDrawer:(wg:UIWorkgroup)=>void;d:UIDash
           const sTotal=site.workgroups.flatMap(wg=>wg.jobs).length;
           return(
             <div key={site.name} onClick={()=>setActiveSite(wi)}
-              style={{padding:"10px 14px",borderRadius:12,cursor:"pointer",transition:"all .2s",background:isActive?siteC.gradient:siteC.bg,border:`2px solid ${isActive?siteC.accent:siteC.ring}`,boxShadow:isActive?`0 4px 16px ${siteC.accent}30`:"none",transform:isActive?"translateY(-1px)":"none"}}
+              style={{padding:"10px 14px",borderRadius:12,cursor:"pointer",transition:"all .2s",
+                background:isActive?siteC.gradient:siteC.bg,
+                border:`2px solid ${isActive?siteC.accent:siteC.ring}`,
+                boxShadow:isActive?`0 4px 16px ${siteC.accent}30`:"none",
+                transform:isActive?"translateY(-1px)":"none"}}
               onMouseEnter={e=>{if(!isActive){e.currentTarget.style.borderColor=siteC.accent;e.currentTarget.style.transform="translateY(-1px)"}}}
               onMouseLeave={e=>{if(!isActive){e.currentTarget.style.borderColor=siteC.ring;e.currentTarget.style.transform="none"}}}>
               <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:4}}>
@@ -288,12 +292,13 @@ function CardView({onOpenDrawer,d}:{onOpenDrawer:(wg:UIWorkgroup)=>void;d:UIDash
         })}
       </div>
 
-      {/* Selected Site Content */}
-      {ws&&<div key={activeSite} style={{animation:"fu .3s cubic-bezier(.22,1,.36,1) both"}}>
+      {/* ── Selected Site Content ── */}
+      <div key={activeSite} style={{animation:"fu .3s cubic-bezier(.22,1,.36,1) both"}}>
+        {/* Site header */}
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,padding:"10px 16px",borderRadius:14,background:sc.gradient}}>
           <div style={{width:32,height:32,borderRadius:10,background:"rgba(255,255,255,0.15)",display:"flex",alignItems:"center",justifyContent:"center"}}><MapPinI size={16} color="#fff"/></div>
           <div style={{flex:1}}>
-            <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16,fontWeight:800,color:"#fff"}}>{ws.shortName}</span><span style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{ws.name.split(", ")[1]||""}</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16,fontWeight:800,color:"#fff"}}>{ws.shortName}</span><span style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{ws.name.split(", ")[1]}</span></div>
             <div style={{display:"flex",gap:10,marginTop:2}}>
               <span style={{fontSize:12,color:"rgba(255,255,255,0.6)"}}>{fmt(ws.budget)}</span>
               <span style={{fontSize:12,fontWeight:700,color:"#34d399"}}>{fmt(wsSpent)} paid</span>
@@ -302,6 +307,7 @@ function CardView({onOpenDrawer,d}:{onOpenDrawer:(wg:UIWorkgroup)=>void;d:UIDash
             </div>
           </div>
         </div>
+        {/* 3-column workgroup cards */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:12}}>
           {ws.workgroups.map((wg,wgi)=>{
             const ti=TI[wg.trade]||{Icon:HammerI,c:"#6b7280",bg:"#f1f5f9"};const TradeIcon=ti.Icon;const sm=SM[wg.status]||SM.draft;
@@ -314,6 +320,7 @@ function CardView({onOpenDrawer,d}:{onOpenDrawer:(wg:UIWorkgroup)=>void;d:UIDash
                 onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow=""}}>
                 <div style={{height:3,background:sm.p.grad}}/>
                 <div style={{padding:"12px 14px"}}>
+                  {/* Card header */}
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
                     <div style={{display:"flex",alignItems:"center",gap:10}}>
                       <div style={{width:36,height:36,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",background:ti.bg}}><TradeIcon size={18} color={ti.c}/></div>
@@ -324,27 +331,37 @@ function CardView({onOpenDrawer,d}:{onOpenDrawer:(wg:UIWorkgroup)=>void;d:UIDash
                     </div>
                     <ChevI size={14} color="#cbd5e1"/>
                   </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><div style={{flex:1}}><Bar pct={pc} grad={sm.p.grad}/></div><span style={{fontSize:13,fontWeight:900,color:sm.p.fg}}>{pc}%</span></div>
+
+                  {/* Progress bar */}
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <div style={{flex:1}}><Bar pct={pc} grad={sm.p.grad}/></div>
+                    <span style={{fontSize:13,fontWeight:900,color:sm.p.fg}}>{pc}%</span>
+                  </div>
+
+                  {/* 3 Mini Info Cards */}
                   <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                    {/* Jobs mini card */}
+                    {/* Jobs */}
                     <div style={{borderRadius:10,padding:"8px 10px",background:"#f8fafc",border:"1px solid #f1f5f9"}}>
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
                         <span style={{fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:"0.06em"}}>Jobs</span>
                         <span style={{fontSize:12,fontWeight:800,color:sm.p.fg}}>{dn}/{wg.jobs.length}</span>
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                        {wg.jobs.map(job=>{const isDone=job.status==="complete",isAct=job.status==="in_progress";return(
-                          <div key={job.id} style={{display:"flex",alignItems:"center",gap:6}}>
-                            {isDone?<div style={{width:16,height:16,borderRadius:8,background:P.done.grad,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><CheckI size={9} color="#fff" sw={3}/></div>
-                            :isAct?<div style={{width:16,height:16,borderRadius:8,background:P.active.grad,flexShrink:0,animation:"pg 2s ease-in-out infinite"}}/>
-                            :<div style={{width:16,height:16,borderRadius:8,border:"1.5px solid #d1d5db",background:"#fff",flexShrink:0}}/>}
-                            <span style={{fontSize:12,color:isDone?"#94a3b8":"#334155",fontWeight:isDone?500:600,textDecoration:isDone?"line-through":"none",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.title}</span>
-                            <span style={{fontSize:10,color:"#94a3b8",fontWeight:700,flexShrink:0}}>{fmt(job.budget)}</span>
-                          </div>
-                        )})}
+                        {wg.jobs.map(job=>{
+                          const isDone=job.status==="complete", isAct=job.status==="in_progress";
+                          return(
+                            <div key={job.id} style={{display:"flex",alignItems:"center",gap:6}}>
+                              {isDone?<div style={{width:16,height:16,borderRadius:8,background:P.done.grad,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><CheckI size={9} color="#fff" sw={3}/></div>
+                              :isAct?<div style={{width:16,height:16,borderRadius:8,background:P.active.grad,flexShrink:0,animation:"pg 2s ease-in-out infinite"}}/>
+                              :<div style={{width:16,height:16,borderRadius:8,border:"1.5px solid #d1d5db",background:"#fff",flexShrink:0}}/>}
+                              <span style={{fontSize:12,color:isDone?"#94a3b8":"#334155",fontWeight:isDone?500:600,textDecoration:isDone?"line-through":"none",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.title}</span>
+                              <span style={{fontSize:10,color:"#94a3b8",fontWeight:700,flexShrink:0}}>{fmt(job.budget)}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-                    {/* Budget mini card */}
+                    {/* Budget */}
                     <div style={{borderRadius:10,padding:"8px 10px",background:sc.bg,border:`1px solid ${sc.ring}`}}>
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}>
                         <span style={{fontSize:10,fontWeight:700,color:sc.text,textTransform:"uppercase",letterSpacing:"0.06em"}}>Budget</span>
@@ -352,46 +369,54 @@ function CardView({onOpenDrawer,d}:{onOpenDrawer:(wg:UIWorkgroup)=>void;d:UIDash
                       </div>
                       <BudgetBar spent={wgS} invoiced={wgI} total={wg.budget} h={5}/>
                       <div style={{display:"flex",justifyContent:"space-between",marginTop:5}}>
-                        <span style={{fontSize:11}}>{wgS>0&&<span style={{color:P.done.fg,fontWeight:700}}>{fmt(wgS)} paid</span>}{wgS>0&&wgI>0?" · ":""}{wgI>0&&<span style={{color:P.pending.fg,fontWeight:700}}>{fmt(wgI)} invoiced</span>}{wgS===0&&wgI===0&&<span style={{color:"#94a3b8"}}>No spend yet</span>}</span>
+                        <span style={{fontSize:11}}>
+                          {wgS>0&&<span style={{color:P.done.fg,fontWeight:700}}>{fmt(wgS)} paid</span>}
+                          {wgS>0&&wgI>0?" · ":""}
+                          {wgI>0&&<span style={{color:P.pending.fg,fontWeight:700}}>{fmt(wgI)} invoiced</span>}
+                          {wgS===0&&wgI===0&&<span style={{color:"#94a3b8"}}>No spend yet</span>}
+                        </span>
                         <span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>{fmt(wg.budget-wgS-wgI)} left</span>
                       </div>
                     </div>
-                    {/* Schedule mini card */}
+                    {/* Schedule */}
                     <div style={{borderRadius:10,padding:"8px 10px",background:"#f8fafc",border:"1px solid #f1f5f9"}}>
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                         <span style={{fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:"0.06em"}}>Schedule</span>
                         <span style={{fontSize:12,fontWeight:700,color:"#475569"}}>{wg.jobs.reduce((a,j)=>a+j.durationDays,0)} days</span>
                       </div>
-                      {wg.startDate&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}}>
                         <CalI size={13} color="#94a3b8"/>
-                        <span style={{fontSize:12,color:"#475569",fontWeight:600}}>{new Date(wg.startDate).toLocaleDateString("en-US",{month:"short",day:"numeric"})} — {wg.endDate?new Date(wg.endDate).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"TBD"}</span>
-                      </div>}
+                        <span style={{fontSize:12,color:"#475569",fontWeight:600}}>{new Date(wg.startDate).toLocaleDateString("en-US",{month:"short",day:"numeric"})} — {new Date(wg.endDate).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>
+                      </div>
                     </div>
                   </div>
-                  {wg.dependsOn&&<div style={{display:"flex",alignItems:"center",gap:5,marginTop:8,padding:"6px 10px",borderRadius:10,background:P.pending.bg,border:`1px solid ${P.pending.ring}`}}><ArrI size={11} color={P.pending.fg}/><span style={{fontSize:11,fontWeight:700,color:P.pending.fg}}>Blocked by {d.allWg.find(w=>w.id===wg.dependsOn)?.title||"unknown"}</span></div>}
+
+                  {/* Dependency */}
+                  {wg.dependsOn&&<div style={{display:"flex",alignItems:"center",gap:5,marginTop:8,padding:"6px 10px",borderRadius:10,background:P.pending.bg,border:`1px solid ${P.pending.ring}`}}><ArrI size={11} color={P.pending.fg}/><span style={{fontSize:11,fontWeight:700,color:P.pending.fg}}>Blocked by {allWg.find(w=>w.id===wg.dependsOn)?.title}</span></div>}
                 </div>
               </div>
             );
           })}
         </div>
-      </div>}
+      </div>
     </div>
   );
 }
 
-/* ═══════════════════ PROJECT OUTLOOK ═══════════════════ */
-function ProjectOutlook({d}:{d:UIDashboard}){
+/* ═══════════════════ PROJECT OUTLOOK (Right Panel) ═══════════════════ */
+function ProjectOutlook(){
   return(
     <div style={{width:390,flexShrink:0,display:"flex",flexDirection:"column",minHeight:0,overflowY:"auto",background:"linear-gradient(180deg,#f8fafc,#fff)",borderLeft:"1.5px solid #e2e8f0"}}>
+      {/* Panel Title */}
       <div style={{padding:"10px 16px",borderBottom:"1.5px solid #e2e8f0",background:"linear-gradient(135deg,#0f172a,#1e293b)"}}>
         <h2 style={{fontSize:15,fontWeight:900,color:"#fff",letterSpacing:"-0.01em"}}>Project Outlook</h2>
       </div>
+
       <div style={{padding:"12px 16px",borderBottom:"1px solid #e2e8f0"}}>
         <h3 style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:"0.12em",color:"#1e293b",display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
           <div style={{width:22,height:22,borderRadius:7,background:P.crit.grad,display:"flex",alignItems:"center",justifyContent:"center"}}><AlertCI size={12} color="#fff"/></div>Critical Path
         </h3>
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          {/* TODO: Replace with real critical path from API */}
           {[{s:"123 Main",ch:"Plumbing → Painting",sv:"high",dt:"Pending 18h. Painting delayed ~3 wks."},
             {s:"456 Oak",ch:"HVAC → Electrical",sv:"med",dt:"HVAC pending 12h. Electrical blocked."},
             {s:"789 Elm",ch:"Flooring → Painting",sv:"med",dt:"Flooring pending 6h. Painting blocked."}
@@ -411,8 +436,8 @@ function ProjectOutlook({d}:{d:UIDashboard}){
           <span style={{display:"flex",alignItems:"center",gap:3,fontSize:11,fontWeight:700,background:P.done.grad,padding:"3px 10px",borderRadius:12,color:"#fff"}}><RadioI size={10} color="#fff"/>Live</span>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:5}}>
-          {[{t:"success",text:`${d.jDone} jobs complete. ${d.jActive} in progress across ${d.worksites.length} sites.`,IconC:CheckI},
-            {t:"warning",text:`${d.wgPendingN} workgroups pending contractor response.`,IconC:AlertTI},
+          {[{t:"success",text:"Roofing 25% done. On track for Mar 15 deadline.",IconC:CheckI},
+            {t:"warning",text:"3 contractors haven't responded. 24h reminder approaching.",IconC:AlertTI},
             {t:"info",text:"No GPS check-ins yet. Workers must check in on-site.",IconC:MapPinI}
           ].map((ins,i)=>{const c=ins.t==="success"?P.done:ins.t==="warning"?P.pending:P.active;return(
             <div key={i} style={{display:"flex",gap:8,padding:"7px 8px",borderRadius:10,cursor:"pointer",border:"1px solid transparent"}}
@@ -427,7 +452,7 @@ function ProjectOutlook({d}:{d:UIDashboard}){
       <div style={{padding:"12px 16px",borderBottom:"1px solid #e2e8f0"}}>
         <h3 style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:"0.12em",color:"#1e293b",marginBottom:10}}>Needs Attention</h3>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[{v:d.wgPendingN,l:"Pending",p:P.pending},{v:0,l:"Invoices",p:P.draft},{v:0,l:"GPS Today",p:P.crit},{v:d.wgActiveN,l:"Active",p:P.active}].map(it=>(
+          {[{v:wgPendingN,l:"Pending",p:P.pending},{v:0,l:"Invoices",p:P.draft},{v:0,l:"GPS Today",p:P.crit},{v:wgActiveN,l:"Active",p:P.active}].map(it=>(
             <div key={it.l} style={{padding:"10px 8px",borderRadius:12,textAlign:"center",background:it.p.bg,border:`1px solid ${it.p.ring}`}}>
               <p style={{fontSize:22,fontWeight:900,color:it.p.fg}}>{it.v}</p>
               <p style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",color:it.p.fg,opacity:0.6}}>{it.l}</p>
@@ -438,11 +463,11 @@ function ProjectOutlook({d}:{d:UIDashboard}){
       <div style={{padding:"12px 16px"}}>
         <h3 style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:"0.12em",color:"#1e293b",display:"flex",alignItems:"center",gap:6,marginBottom:10}}><UsersI size={14} color="#64748b"/>Site Presence</h3>
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          {d.worksites.map((ws,wi)=>{const ac=ws.workgroups.filter(wg=>wg.status==="in_progress").length;const sc2=SC[wi%SC.length];return(
-            <div key={ws.name} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:12,border:`1px solid ${sc2.ring}`,background:sc2.bg}}>
+          {worksites.map((ws,wi)=>{const ac=ws.workgroups.filter(wg=>wg.status==="in_progress").length;const sc=SC[wi];return(
+            <div key={ws.name} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:12,border:`1px solid ${sc.ring}`,background:sc.bg}}>
               <div style={{width:10,height:10,borderRadius:5,background:ac>0?P.done.grad:"#cbd5e1"}}/>
-              <span style={{fontSize:13,fontWeight:700,color:sc2.text,flex:1}}>{ws.shortName}</span>
-              <span style={{fontSize:12,color:sc2.accent,fontWeight:600}}>{ac>0?`${ac} active`:"Idle"}</span>
+              <span style={{fontSize:13,fontWeight:700,color:sc.text,flex:1}}>{ws.shortName}</span>
+              <span style={{fontSize:12,color:sc.accent,fontWeight:600}}>{ac>0?`${ac} active`:"Idle"}</span>
             </div>
           )})}
         </div>
@@ -454,49 +479,24 @@ function ProjectOutlook({d}:{d:UIDashboard}){
 /* ═══════════════════ MAIN ═══════════════════ */
 export function OwnerDashboard(){
   const[view,setView]=useState("cards");
-  const[drawerWg,setDrawerWg]=useState<UIWorkgroup|null>(null);
+  const[drawerWg,setDrawerWg]=useState(null);
   const[ready,setReady]=useState(false);
   useEffect(()=>{requestAnimationFrame(()=>setReady(true))},[]);
-
-  const{data,loading,error,refresh}=useDashboard();
-  const d=data?transformDashboardData(data):null;
-
-  if(loading||!d){return(
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",fontFamily:"'DM Sans',sans-serif"}}>
-      <style>{css}</style>
-      <div style={{textAlign:"center"}}>
-        <div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTopColor:"#3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite",margin:"0 auto 16px"}}/>
-        <p style={{fontSize:14,color:"#64748b",fontWeight:600}}>Loading dashboard...</p>
-      </div>
-    </div>
-  );}
-
-  if(error){return(
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",fontFamily:"'DM Sans',sans-serif"}}>
-      <style>{css}</style>
-      <div style={{textAlign:"center",padding:32,background:"#fef2f2",borderRadius:16,maxWidth:420}}>
-        <p style={{fontSize:18,fontWeight:800,color:"#dc2626",marginBottom:8}}>Failed to load dashboard</p>
-        <p style={{fontSize:13,color:"#ef4444",marginBottom:16}}>{error}</p>
-        <button onClick={refresh} style={{padding:"10px 24px",borderRadius:10,border:"none",background:P.crit.grad,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>Retry</button>
-      </div>
-    </div>
-  );}
-
   return(
     <div style={{display:"flex",flexDirection:"column",height:"100%",fontFamily:"'DM Sans',system-ui,sans-serif",opacity:ready?1:0,transition:"opacity .3s"}}>
       <style>{css}</style>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 16px",borderBottom:"1.5px solid #e2e8f0",flexShrink:0,background:"linear-gradient(135deg,#0f172a,#1e293b)"}}>
         <div>
-          <h1 style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:"-0.01em"}}>{d.projectTitle}</h1>
+          <h1 style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:"-0.01em"}}>ABC Properties — Multi-Site Renovation</h1>
           <div style={{display:"flex",alignItems:"center",gap:8,marginTop:2}}>
-            {d.projectStartDate&&<span style={{fontSize:13,color:"#64748b",display:"flex",alignItems:"center",gap:3}}><CalI size={12} color="#64748b"/>{new Date(d.projectStartDate).toLocaleDateString("en-US",{month:"short",day:"numeric"})} — {d.projectEndDate?new Date(d.projectEndDate).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"TBD"}</span>}
-            <span style={{fontSize:13,color:"#475569"}}>·</span><span style={{fontSize:13,color:"#94a3b8",fontWeight:700}}>{fmt(d.totalBudget)}</span>
-            <span style={{fontSize:13,color:"#475569"}}>·</span><span style={{fontSize:13,fontWeight:700,color:"#34d399"}}>{d.jDone}/{d.jTotal} done ({d.jTotal>0?Math.round(d.jDone/d.jTotal*100):0}%)</span>
+            <span style={{fontSize:13,color:"#64748b",display:"flex",alignItems:"center",gap:3}}><CalI size={12} color="#64748b"/>Mar 1 — Sep 30, 2026</span>
+            <span style={{fontSize:13,color:"#475569"}}>·</span><span style={{fontSize:13,color:"#94a3b8",fontWeight:700}}>$185K</span>
+            <span style={{fontSize:13,color:"#475569"}}>·</span><span style={{fontSize:13,fontWeight:700,color:"#34d399"}}>{d.jDone}/{d.jTotal} done ({Math.round(d.jDone/d.jTotal*100)}%)</span>
             {d.jActive>0&&<span style={{fontSize:13,fontWeight:700,color:"#60a5fa"}}>{d.jActive} active</span>}
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {[{v:d.wgActiveN,l:"Active",p:P.active},{v:d.wgPendingN,l:"Pending",p:P.pending},{v:d.allWg.length-d.wgActiveN-d.wgPendingN,l:"Draft",p:P.draft}].map(s=>
+          {[{v:wgActiveN,l:"Active",p:P.active},{v:wgPendingN,l:"Pending",p:P.pending},{v:allWg.length-wgActiveN-wgPendingN,l:"Draft",p:P.draft}].map(s=>
             <div key={s.l} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:6,background:s.p.grad}}>
               <span style={{fontSize:13,fontWeight:900,color:"#fff"}}>{s.v}</span><span style={{fontSize:9,fontWeight:700,textTransform:"uppercase",color:"rgba(255,255,255,0.65)"}}>{s.l}</span>
             </div>
@@ -513,16 +513,17 @@ export function OwnerDashboard(){
               <div key={x.l} style={{display:"flex",alignItems:"center",gap:3}}>{x.sym?<ArrI size={10} color="#fbbf24"/>:<div style={{width:10,height:4,borderRadius:2,background:x.g}}/>}<span style={{fontSize:8,color:"#94a3b8"}}>{x.l}</span></div>
             )}
           </div>}
-          <button onClick={refresh} title="Refresh" style={{padding:7,borderRadius:8,border:"none",background:"rgba(255,255,255,0.1)",cursor:"pointer"}}>
+          <button style={{position:"relative",padding:7,borderRadius:8,border:"none",background:"rgba(255,255,255,0.1)",cursor:"pointer"}}>
             <BellI size={14} color="#94a3b8"/>
+            <span style={{position:"absolute",top:-3,right:-3,width:14,height:14,borderRadius:7,background:P.crit.grad,fontSize:7,color:"#fff",fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center"}}>4</span>
           </button>
         </div>
       </div>
       <div style={{flex:1,display:"flex",minHeight:0,background:"#f1f5f9"}}>
-        {view==="gantt"?<GanttView d={d}/>:<CardView onOpenDrawer={setDrawerWg} d={d}/>}
-        <ProjectOutlook d={d}/>
+        {view==="gantt"?<GanttView/>:<CardView onOpenDrawer={setDrawerWg}/>}
+        <ProjectOutlook/>
       </div>
-      {drawerWg&&<WorkgroupDrawer wg={drawerWg} allWg={d.allWg} onClose={()=>setDrawerWg(null)}/>}
+      {drawerWg&&<WorkgroupDrawer wg={drawerWg} onClose={()=>setDrawerWg(null)}/>}
     </div>
   );
 }
