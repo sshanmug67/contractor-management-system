@@ -199,8 +199,8 @@ function WorkgroupDrawer({ wg, allWg, onClose }: { wg: UIWorkgroup; allWg: UIWor
               </div>
             ); })}
           </div>
-          {wg.dependsOnIds.length > 0 && <div style={{ marginTop: 10, padding: "7px 10px", borderRadius: 10, background: P.pending.bg, border: `1.5px solid ${P.pending.ring}`, display: "flex", alignItems: "center", gap: 6 }}>
-            <ArrI size={12} color={P.pending.fg} /><span style={{ fontSize: 10, fontWeight: 700, color: P.pending.fg }}>Blocked by {wg.dependsOnIds.map(id => allWg.find((w) => w.id === id)?.title || "unknown").join(", ")}</span>
+          {wg.dependsOn && <div style={{ marginTop: 10, padding: "7px 10px", borderRadius: 10, background: P.pending.bg, border: `1.5px solid ${P.pending.ring}`, display: "flex", alignItems: "center", gap: 6 }}>
+            <ArrI size={12} color={P.pending.fg} /><span style={{ fontSize: 10, fontWeight: 700, color: P.pending.fg }}>Blocked by {allWg.find((w) => w.id === wg.dependsOn)?.title || "unknown"}</span>
           </div>}
         </div>
       </div>
@@ -213,18 +213,6 @@ function GanttView({ d }: { d: UIDashboard }) {
   const [exp, setExp] = useState<Set<string>>(new Set(d.worksites[0]?.workgroups.slice(0, 2).map(w => w.id) || []));
   const [hovered, setHovered] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [rightW, setRightW] = useState(0);
-
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    const measure = () => setRightW(el.clientWidth - 280);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   /* ── Dynamic date range ── */
   const allDates: number[] = [];
@@ -270,9 +258,34 @@ function GanttView({ d }: { d: UIDashboard }) {
   const todayPct = d2p(new Date());
 
   const LEFT_W = 280;
-  const ROW_H = 42;
+  const ROW_H = 48;
   const JOB_ROW_H = 34;
   const SITE_ROW_H = 36;
+
+  // Build dependency map: wg.id -> wg.id it depends on
+  const depMap = new Map<string, string>();
+  d.worksites.forEach(ws => ws.workgroups.forEach(wg => {
+    if (wg.dependsOn) depMap.set(wg.id, wg.dependsOn);
+  }));
+
+  // Build wg position map for dependency arrows (track Y pixel position)
+  let rowIdx = 0;
+  const wgRowMap = new Map<string, number>(); // wg.id -> accumulated Y pixel position
+  const wgBarMap = new Map<string, { left: number; right: number }>();
+  const wgNameMap = new Map<string, string>(); // wg.id -> wg.title (for "Waiting on X" labels)
+  d.worksites.forEach(ws => {
+    rowIdx += SITE_ROW_H; // site header
+    ws.workgroups.forEach(wg => {
+      wgRowMap.set(wg.id, rowIdx + ROW_H / 2); // center of this row
+      wgNameMap.set(wg.id, wg.title);
+      const s = wg.startDate ? d2p(wg.startDate) : 0;
+      const e = wg.endDate ? d2p(wg.endDate) : s + 4;
+      wgBarMap.set(wg.id, { left: s, right: e });
+      rowIdx += ROW_H; // workgroup row
+      if (exp.has(wg.id)) rowIdx += wg.jobs.length * JOB_ROW_H; // expanded jobs
+    });
+  });
+  const totalBodyH = rowIdx;
 
   const toggleExp = (id: string) => {
     setExp(prev => {
@@ -281,151 +294,6 @@ function GanttView({ d }: { d: UIDashboard }) {
       return next;
     });
   };
-
-  // ── Pre-compute all bar positions (workgroups AND jobs) for dependency overlay ──
-  // Job bar geometry: same logic as the render loop, but computed upfront
-  interface BarPos { left: number; right: number; yCenterPx: number; }
-  const wgBarPos = new Map<string, BarPos>();
-  const jobBarPos = new Map<string, BarPos>();
-  // Track which workgroup each job belongs to (for collapsed fallback)
-  const jobToWgId = new Map<string, string>();
-  // Collect all job dependency edges
-  interface JobDepEdge { fromJobId: string; toJobId: string; }
-  const jobDepEdges: JobDepEdge[] = [];
-
-  let yOff = 0;
-  d.worksites.forEach(ws => {
-    yOff += SITE_ROW_H; // site header
-    ws.workgroups.forEach(wg => {
-      const wgYCenter = yOff + ROW_H / 2;
-      const wgS = wg.startDate ? d2p(wg.startDate) : 0;
-      const wgE = wg.endDate ? d2p(wg.endDate) : wgS + 4;
-      wgBarPos.set(wg.id, { left: wgS, right: wgE, yCenterPx: wgYCenter });
-      yOff += ROW_H; // workgroup row
-
-      // Compute each job's bar position
-      const wStart = wg.startDate ? new Date(wg.startDate).getTime() : tS;
-      wg.jobs.forEach((job: UIJob, ji: number) => {
-        jobToWgId.set(job.id, wg.id);
-
-        const dayOff = wg.jobs.slice(0, job.sequence - 1).reduce((a: number, j: UIJob) => a + j.durationDays, 0);
-        const jS = new Date(wStart + dayOff * 864e5);
-        const jE = new Date(jS.getTime() + job.durationDays * 864e5);
-        const jL = d2p(jS);
-        const jR = d2p(jE);
-
-        if (exp.has(wg.id)) {
-          // Expanded: job has its own row
-          const jobYCenter = yOff + JOB_ROW_H / 2;
-          jobBarPos.set(job.id, { left: jL, right: jR, yCenterPx: jobYCenter });
-          yOff += JOB_ROW_H;
-        } else {
-          // Collapsed: job maps to the workgroup bar's Y position
-          jobBarPos.set(job.id, { left: jL, right: jR, yCenterPx: wgYCenter });
-        }
-
-        // Collect dependency edges from this job
-        const deps: string[] = job.dependsOnJobIds || [];
-        deps.forEach((predJobId: string) => {
-          jobDepEdges.push({ fromJobId: predJobId, toJobId: job.id });
-        });
-      });
-    });
-  });
-  const totalContentH = yOff;
-
-  // ── Build curved Bézier paths for each dependency edge ──
-  interface DepCurve {
-    key: string;
-    path: string;
-    x1: number; y1: number;
-    x2: number; y2: number;
-    isCrossWg: boolean;
-    level: 'job' | 'workgroup';
-  }
-  const depCurves: DepCurve[] = [];
-
-  // Track which workgroup pairs already have job-level curves
-  const coveredWgPairs = new Set<string>();
-
-  if (rightW > 0) {
-    // ── Layer 1: Job-level curves (from job_dependencies) ──
-    jobDepEdges.forEach(({ fromJobId, toJobId }) => {
-      const fromPos = jobBarPos.get(fromJobId);
-      const toPos = jobBarPos.get(toJobId);
-      if (!fromPos || !toPos) return;
-
-      const x1 = (fromPos.right / 100) * rightW;
-      const y1 = fromPos.yCenterPx;
-      const x2 = (toPos.left / 100) * rightW;
-      const y2 = toPos.yCenterPx;
-
-      const dy = y2 - y1;
-      const dx = x2 - x1;
-      const fromWg = jobToWgId.get(fromJobId);
-      const toWg = jobToWgId.get(toJobId);
-      const isCrossWg = fromWg !== toWg;
-
-      // Mark this workgroup pair as covered by job-level deps
-      if (isCrossWg && fromWg && toWg) coveredWgPairs.add(`${fromWg}->${toWg}`);
-
-      let path: string;
-      if (Math.abs(dy) < 4) {
-        const cpOff = Math.max(Math.abs(dx) * 0.35, 18);
-        path = `M ${x1},${y1} C ${x1 + cpOff},${y1} ${x2 - cpOff},${y2} ${x2},${y2}`;
-      } else if (dx > 0) {
-        const exitLen = Math.max(Math.min(dx * 0.3, 60), 16);
-        const entryLen = Math.max(Math.min(dx * 0.3, 60), 16);
-        path = `M ${x1},${y1} C ${x1 + exitLen},${y1} ${x2 - entryLen},${y2} ${x2},${y2}`;
-      } else {
-        const loopOut = 30;
-        const midY = (y1 + y2) / 2;
-        const bump = Math.sign(dy || 1) * Math.max(Math.abs(dy) * 0.4, 24);
-        path = `M ${x1},${y1} C ${x1 + loopOut},${y1} ${x1 + loopOut},${midY + bump} ${(x1 + x2) / 2},${midY + bump} S ${x2 - loopOut},${y2} ${x2},${y2}`;
-      }
-
-      depCurves.push({ key: `job:${fromJobId}->${toJobId}`, path, x1, y1, x2, y2, isCrossWg, level: 'job' });
-    });
-
-    // ── Layer 2: Workgroup-level curves (from wg.dependsOnIds) ──
-    // Only render if no job-level curves already cover this pair
-    d.worksites.forEach(ws => ws.workgroups.forEach(wg => {
-      if (wg.dependsOnIds.length === 0) return;
-      wg.dependsOnIds.forEach(predId => {
-        // Skip if job-level deps already cover this workgroup pair
-        if (coveredWgPairs.has(`${predId}->${wg.id}`)) return;
-
-        const fromPos = wgBarPos.get(predId);
-        const toPos = wgBarPos.get(wg.id);
-        if (!fromPos || !toPos) return;
-
-        const x1 = (fromPos.right / 100) * rightW;
-        const y1 = fromPos.yCenterPx;
-        const x2 = (toPos.left / 100) * rightW;
-        const y2 = toPos.yCenterPx;
-
-        const dy = y2 - y1;
-        const dx = x2 - x1;
-
-        let path: string;
-        if (Math.abs(dy) < 4) {
-          const cpOff = Math.max(Math.abs(dx) * 0.35, 18);
-          path = `M ${x1},${y1} C ${x1 + cpOff},${y1} ${x2 - cpOff},${y2} ${x2},${y2}`;
-        } else if (dx > 0) {
-          const exitLen = Math.max(Math.min(dx * 0.3, 60), 16);
-          const entryLen = Math.max(Math.min(dx * 0.3, 60), 16);
-          path = `M ${x1},${y1} C ${x1 + exitLen},${y1} ${x2 - entryLen},${y2} ${x2},${y2}`;
-        } else {
-          const loopOut = 30;
-          const midY = (y1 + y2) / 2;
-          const bump = Math.sign(dy || 1) * Math.max(Math.abs(dy) * 0.4, 24);
-          path = `M ${x1},${y1} C ${x1 + loopOut},${y1} ${x1 + loopOut},${midY + bump} ${(x1 + x2) / 2},${midY + bump} S ${x2 - loopOut},${y2} ${x2},${y2}`;
-        }
-
-        depCurves.push({ key: `wg:${predId}->${wg.id}`, path, x1, y1, x2, y2, isCrossWg: true, level: 'workgroup' });
-      });
-    }));
-  }
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -454,62 +322,15 @@ function GanttView({ d }: { d: UIDashboard }) {
 
       {/* ── Scrollable body ── */}
       <div style={{ flex: 1, overflowY: "auto" }}>
-        <div ref={contentRef} style={{ paddingBottom: 35, background: "#fff", minHeight: "100%", position: "relative" }}>
-
-        {/* ── Curved dependency connections overlay ── */}
-        {rightW > 0 && depCurves.length > 0 && (
-          <svg style={{
-            position: "absolute", top: 0, left: LEFT_W, width: `calc(100% - ${LEFT_W}px)`,
-            height: Math.max(totalContentH, 1), pointerEvents: "none", zIndex: 15, overflow: "visible",
-          }}>
-            <defs>
-              {/* Arrowhead for cross-workgroup (amber) */}
-              <marker id="dep-arrow-cross" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-                <path d="M1,1 L7,4 L1,7" fill="none" stroke="#C07B1A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </marker>
-              {/* Arrowhead for intra-workgroup (muted slate) */}
-              <marker id="dep-arrow-intra" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-                <path d="M1,1 L7,4 L1,7" fill="none" stroke="#9C8E7C" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </marker>
-            </defs>
-            {depCurves.map(dep => {
-              const color = dep.isCrossWg ? "#C07B1A" : "#9C8E7C";
-              const glowColor = dep.isCrossWg ? "rgba(192,123,26,0.1)" : "rgba(156,142,124,0.08)";
-              const markerId = dep.isCrossWg ? "dep-arrow-cross" : "dep-arrow-intra";
-              return (
-                <g key={dep.key}>
-                  {/* Subtle glow path underneath */}
-                  <path
-                    d={dep.path}
-                    fill="none"
-                    stroke={glowColor}
-                    strokeWidth="6"
-                    strokeLinecap="round"
-                  />
-                  {/* Main curved dependency line */}
-                  <path
-                    d={dep.path}
-                    fill="none"
-                    stroke={color}
-                    strokeWidth="1.5"
-                    strokeDasharray={dep.isCrossWg ? "6 4" : "4 3"}
-                    strokeLinecap="round"
-                    markerEnd={`url(#${markerId})`}
-                    style={{ transition: "d 0.4s ease" }}
-                  />
-                </g>
-              );
-            })}
-          </svg>
-        )}
+        <div style={{ paddingBottom: 25, background: "#fff", minHeight: "100%", position: "relative" }}>
         {d.worksites.map((ws, wi) => {
           const sc = SC[wi % SC.length];
           return (
             <div key={ws.name} style={{ animation: `fu .32s ${wi * 70}ms both` }}>
 
               {/* ── Site header row ── */}
-              <div style={{ display: "flex", alignItems: "stretch", height: SITE_ROW_H, borderBottom: "1.5px solid #C4B5A2", position: "sticky", top: 0, zIndex: 10 }}>
-                <div style={{ width: LEFT_W, flexShrink: 0, padding: "0 14px", display: "flex", alignItems: "center", gap: 8, background: sc.gradient }}>
+              <div style={{ display: "flex", alignItems: "stretch", borderBottom: "1.5px solid #C4B5A2", position: "sticky", top: 0, zIndex: 10 }}>
+                <div style={{ width: LEFT_W, flexShrink: 0, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8, background: sc.gradient }}>
                   <MapPinI size={12} color="#fff" />
                   <span style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>{ws.shortName}</span>
                   <span style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", fontWeight: 600 }}>{ws.workgroups.length} trades · {ws.workgroups.flatMap(wg => wg.jobs).length} jobs</span>
@@ -532,9 +353,12 @@ function GanttView({ d }: { d: UIDashboard }) {
                 const e = wg.endDate ? d2p(wg.endDate) : s + 4;
                 const w = Math.max(e - s, 2);
                 const wgSpent = wg.jobs.filter((j: UIJob) => j.paid).reduce((a: number, j: UIJob) => a + (j.invoiceAmount || 0), 0);
+                const depId = wg.dependsOn;
+                const depBar = depId ? wgBarMap.get(depId) : null;
+                const depName = depId ? wgNameMap.get(depId) || "" : "";
 
                 return (
-                  <div key={wg.id} style={{ animation: `si .3s ${wi * 70 + wgi * 45 + 60}ms both` }}>
+                  <div key={wg.id} style={{ animation: `si .3s ${wi * 70 + wgi * 45 + 60}ms both`, overflow: "visible", position: "relative", zIndex: wg.dependsOn ? 2 : 1 }}>
 
                     {/* Workgroup row */}
                     <div
@@ -547,6 +371,7 @@ function GanttView({ d }: { d: UIDashboard }) {
                         cursor: "pointer",
                         background: isH ? "#FAF9F6" : isE ? "#FAFAF8" : "transparent",
                         transition: "background .15s",
+                        overflow: "visible", position: "relative",
                       }}>
 
                       {/* Left panel */}
@@ -565,13 +390,20 @@ function GanttView({ d }: { d: UIDashboard }) {
                           <p style={{ fontSize: 10, color: "#9C8E7C", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {wg.contractor} · {dn}/{wg.jobs.length} jobs · {fmt(wg.budget)}
                           </p>
+                          {depName && (
+                            <p style={{ fontSize: 10, fontWeight: 700, color: "#C07B1A", marginTop: 1 }}>
+                              Waiting on {depName}
+                            </p>
+                          )}
                         </div>
                       </div>
 
                       {/* Right: Gantt bars */}
-                      <div style={{ flex: 1, position: "relative", height: "100%", display: "flex", alignItems: "center" }}>
+                      <div style={{ flex: 1, position: "relative", height: "100%", display: "flex", alignItems: "center", overflow: "visible" }}>
                         {/* Month grid lines */}
                         {months.map((m, i) => i > 0 ? <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${m.left}%`, borderLeft: "1px solid rgba(0,0,0,0.04)" }} /> : null)}
+
+                        {/* Dependency connector: rendered by overlay SVG below */}
 
                         {/* Workgroup bar */}
                         <div
@@ -580,8 +412,8 @@ function GanttView({ d }: { d: UIDashboard }) {
                           style={{
                             position: "absolute", height: 24, borderRadius: 8, overflow: "hidden",
                             left: `${s}%`, width: `${w}%`,
-                            background: wg.dependsOnIds.length > 0 && wg.status !== "complete" && wg.status !== "in_progress" ? "transparent" : "rgba(0,0,0,0.04)",
-                            border: wg.dependsOnIds.length > 0 && wg.status !== "complete" && wg.status !== "in_progress" ? `2px dashed ${P.pending.fg}` : `1.5px solid ${sm.p.ring}`,
+                            background: wg.dependsOn && wg.status !== "complete" && wg.status !== "in_progress" ? "transparent" : "rgba(0,0,0,0.04)",
+                            border: wg.dependsOn && wg.status !== "complete" && wg.status !== "in_progress" ? `2px dashed ${P.pending.fg}` : `1.5px solid ${sm.p.ring}`,
                             transition: "box-shadow .2s",
                             boxShadow: isH ? `0 2px 10px ${sm.p.fg}20` : "none",
                             zIndex: 6,
@@ -697,6 +529,54 @@ function GanttView({ d }: { d: UIDashboard }) {
             </div>
           );
         })}
+
+        {/* ── Dependency connector overlay (cross-row arrows) ── */}
+        {totalBodyH > 0 && (
+          <svg
+            style={{
+              position: "absolute",
+              top: 0,
+              left: LEFT_W,
+              width: `calc(100% - ${LEFT_W}px)`,
+              height: totalBodyH,
+              pointerEvents: "none",
+              zIndex: 5,
+              overflow: "visible",
+            }}
+            viewBox={`0 0 100 ${totalBodyH}`}
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <marker id="dep-arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,1 L8,4 L0,7 L2,4 Z" fill="#C07B1A" />
+              </marker>
+            </defs>
+            {Array.from(depMap.entries()).map(([wgId, depId]) => {
+              const srcBar = wgBarMap.get(depId);
+              const tgtBar = wgBarMap.get(wgId);
+              const srcY = wgRowMap.get(depId);
+              const tgtY = wgRowMap.get(wgId);
+              if (!srcBar || !tgtBar || srcY == null || tgtY == null) return null;
+
+              const x1 = srcBar.right;
+              const x2 = tgtBar.left;
+              const midX = x1 + 1.2; // small horizontal offset from source end
+              // Use vectorEffect to keep stroke width consistent regardless of viewBox scaling
+              return (
+                <path
+                  key={`dep-${depId}-${wgId}`}
+                  d={`M ${x1} ${srcY} H ${midX} V ${tgtY} H ${x2 - 0.3}`}
+                  fill="none"
+                  stroke="#C07B1A"
+                  strokeWidth="1.5"
+                  strokeDasharray="5 3"
+                  vectorEffect="non-scaling-stroke"
+                  markerEnd="url(#dep-arrow)"
+                />
+              );
+            })}
+          </svg>
+        )}
 
         {/* Today line continues through body */}
         <div style={{ position: "sticky", bottom: 0, height: 0, zIndex: 5, pointerEvents: "none" }}>
@@ -835,8 +715,9 @@ function CardView({ onOpenDrawer, d }: { onOpenDrawer: (wg: UIWorkgroup) => void
                 onMouseEnter={() => setHoveredWg(wg.id)} onMouseLeave={() => setHoveredWg(null)}
                 style={{
                   borderRadius: 16,
-                  border: `2px solid ${isH ? "#A89880" : "#C4B5A2"}`,
-                  borderStyle: wg.dependsOnIds.length > 0 ? "dashed" : "solid",
+                  borderWidth: 2,
+                  borderColor: isH ? "#A89880" : "#C4B5A2",
+                  borderStyle: wg.dependsOn ? "dashed" : "solid",
                   background: "#fff", overflow: "hidden", cursor: "pointer",
                   transition: "all .22s ease",
                   transform: isH ? "translateY(-2px)" : "none",
@@ -982,10 +863,10 @@ function CardView({ onOpenDrawer, d }: { onOpenDrawer: (wg: UIWorkgroup) => void
                   </div>
 
                   {/* Blocked by */}
-                  {wg.dependsOnIds.length > 0 && (
+                  {wg.dependsOn && (
                     <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8, padding: "5px 10px", borderRadius: 8, background: P.pending.bg, border: `1px solid ${P.pending.ring}` }}>
                       <ArrI size={11} color={P.pending.fg} />
-                      <span style={{ fontSize: 11, fontWeight: 700, color: P.pending.fg }}>Blocked by {wg.dependsOnIds.map(id => d.allWg.find((w) => w.id === id)?.title || "unknown").join(", ")}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: P.pending.fg }}>Blocked by {d.allWg.find((w) => w.id === wg.dependsOn)?.title || "unknown"}</span>
                     </div>
                   )}
                 </div>
@@ -1290,8 +1171,7 @@ export function ProjectDetailPage() {
             <div key={x.l} style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 14, height: 6, borderRadius: 3, background: x.g }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>{x.l}</span></div>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 8, height: 8, transform: "rotate(45deg)", background: P.done.fg, border: "1px solid #fff", boxShadow: `0 0 0 0.5px ${P.done.fg}` }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>Milestone</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 C6,5 14,5 19,5" stroke="#C07B1A" strokeWidth="1.5" strokeDasharray="3 2" fill="none" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#C07B1A" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Cross-trade dep</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 C6,5 14,5 19,5" stroke="#9C8E7C" strokeWidth="1.5" strokeDasharray="3 2" fill="none" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#9C8E7C" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Job dep</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="16" height="8"><line x1="0" y1="4" x2="12" y2="4" stroke="#C07B1A" strokeWidth="1.5" strokeDasharray="3 2" /><path d="M11,1 L15,4 L11,7" fill="#C07B1A" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Depends</span></div>
         </div>}
       </div>
 

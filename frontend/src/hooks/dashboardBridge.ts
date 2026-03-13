@@ -27,6 +27,7 @@ export interface UIJob {
   invoiced?: boolean;
   paid?: boolean;
   invoiceAmount?: number;
+  dependsOnJobIds: string[];
 }
 
 export interface UIWorkgroup {
@@ -38,7 +39,7 @@ export interface UIWorkgroup {
   startDate: string;
   endDate: string;
   budget: number;
-  dependsOn?: string;
+  dependsOnIds: string[];
   jobs: UIJob[];
 }
 
@@ -92,6 +93,7 @@ function transformJob(job: DashboardJob): UIJob {
     invoiced: job.invoiced,
     paid: job.paid,
     invoiceAmount: job.invoice_amount,
+    dependsOnJobIds: job.depends_on_job_ids || [],
   };
 }
 
@@ -105,7 +107,7 @@ function transformWorkgroup(wg: DashboardWorkgroup): UIWorkgroup {
     startDate: wg.start_date || '',
     endDate: wg.end_date || '',
     budget: wg.budget,
-    dependsOn: wg.depends_on || undefined,
+    dependsOnIds: wg.depends_on_ids || [],
     jobs: wg.jobs.map(transformJob),
   };
 }

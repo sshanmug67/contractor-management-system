@@ -15,6 +15,7 @@ export interface DashboardJob {
   invoiced: boolean;
   paid: boolean;
   invoice_amount: number;
+  depends_on_job_ids: string[];
 }
 
 export interface DashboardWorkgroup {
@@ -29,7 +30,7 @@ export interface DashboardWorkgroup {
   end_date?: string;
   status: string;
   progress_pct: number;
-  depends_on?: string | null;
+  depends_on_ids: string[];
   paid: number;
   invoiced: number;
   jobs: DashboardJob[];

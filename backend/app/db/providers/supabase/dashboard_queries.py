@@ -31,7 +31,7 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                             ...workgroup,
                             "contractor_name": "...",
                             "jobs": [ ... ],
-                            "depends_on": "workgroup_id" | null
+                            "depends_on_ids": ["workgroup_id", ...] | []
                         }
                     ]
                 }
@@ -101,6 +101,16 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
         ) if workgroup_ids else type("R", (), {"data": []})()
         all_jobs = jobs_result.data or []
 
+        # ── 4.5. Get job-level dependencies ────────────────────
+        job_ids = [j["id"] for j in all_jobs]
+        job_deps_result = (
+            self.client.table("job_dependencies")
+            .select("job_id, depends_on_job_id")
+            .in_("job_id", job_ids)
+            .execute()
+        ) if job_ids else type("R", (), {"data": []})()
+        all_job_deps = job_deps_result.data or []
+
         # ── 5. Get workgroup dependencies ─────────────────────
         deps_result = (
             self.client.table("workgroup_dependencies")
@@ -129,10 +139,13 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                 jobs_by_wg[wg_id] = []
             jobs_by_wg[wg_id].append(job)
 
-        # Index dependencies by workgroup_id
-        deps_by_wg = {}
+        # Index dependencies by workgroup_id (list — a workgroup can have multiple predecessors)
+        deps_by_wg: dict[str, list[str]] = {}
         for dep in all_deps:
-            deps_by_wg[dep["workgroup_id"]] = dep["depends_on_workgroup_id"]
+            wg_id = dep["workgroup_id"]
+            if wg_id not in deps_by_wg:
+                deps_by_wg[wg_id] = []
+            deps_by_wg[wg_id].append(dep["depends_on_workgroup_id"])
 
         # Index invoices by workgroup_id
         inv_by_wg = {}
@@ -141,6 +154,14 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
             if wg_id not in inv_by_wg:
                 inv_by_wg[wg_id] = []
             inv_by_wg[wg_id].append(inv)
+
+        # Index job dependencies: job_id → [depends_on_job_id, ...]
+        job_deps_by_job = {}
+        for jd in all_job_deps:
+            jid = jd["job_id"]
+            if jid not in job_deps_by_job:
+                job_deps_by_job[jid] = []
+            job_deps_by_job[jid].append(jd["depends_on_job_id"])
 
         # Build invoice summary per job
         def job_invoice_info(job):
@@ -218,6 +239,7 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                     "invoiced": inv_info["invoiced"],
                     "paid": inv_info["paid"],
                     "invoice_amount": inv_info["invoice_amount"],
+                    "depends_on_job_ids": job_deps_by_job.get(job["id"], []),
                 })
 
             wg_assembled[wg_id] = {
@@ -232,20 +254,21 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                 "end_date": wg.get("end_date"),
                 "status": wg["status"],
                 "progress_pct": float(wg.get("progress_pct") or 0),
-                "depends_on": deps_by_wg.get(wg_id),
+                "depends_on_ids": deps_by_wg.get(wg_id, []),
                 "paid": wg_paid,
                 "invoiced": wg_invoiced,
                 "jobs": enriched_jobs,
             }
 
-        # Assemble worksites with nested workgroups
+        # Assemble worksites with nested workgroups (topologically sorted)
         assembled_worksites = []
         for ws in worksites:
-            ws_wgs = [
-                wg_assembled[wg["id"]]
-                for wg in all_workgroups
+            ws_wg_ids = [
+                wg["id"] for wg in all_workgroups
                 if wg["worksite_id"] == ws["id"] and wg["id"] in wg_assembled
             ]
+            sorted_ids = self._topo_sort_workgroups(ws_wg_ids, deps_by_wg, wg_assembled)
+            ws_wgs = [wg_assembled[wg_id] for wg_id in sorted_ids]
             assembled_worksites.append({
                 "id": ws["id"],
                 "name": ws["name"],
@@ -306,6 +329,63 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
             "total_paid": sum(float(p.get("total_paid") or 0) for p in data),
             "project_count": len(data),
         }
+
+    def _topo_sort_workgroups(
+        self,
+        wg_ids: list[str],
+        deps_by_wg: dict[str, list[str]],
+        wg_assembled: dict,
+    ) -> list[str]:
+        """
+        Topological sort of workgroups within a worksite.
+
+        Roots (no predecessors) appear first, then their dependents, etc.
+        Within the same depth level, workgroups are sorted alphabetically by title.
+        This ensures dependency arrows always flow downward in the Gantt chart.
+
+        Uses Kahn's algorithm (BFS) for clarity and cycle safety.
+        """
+        wg_set = set(wg_ids)
+
+        # Build adjacency: predecessor → [dependents] (only within this worksite)
+        successors: dict[str, list[str]] = {wg_id: [] for wg_id in wg_ids}
+        in_degree: dict[str, int] = {wg_id: 0 for wg_id in wg_ids}
+
+        for wg_id in wg_ids:
+            for pred_id in deps_by_wg.get(wg_id, []):
+                if pred_id in wg_set:  # only count deps within same worksite
+                    successors[pred_id].append(wg_id)
+                    in_degree[wg_id] += 1
+
+        # Seed queue with roots (in_degree == 0), sorted alphabetically
+        def title_key(wg_id: str) -> str:
+            return (wg_assembled.get(wg_id, {}).get("title") or "").lower()
+
+        queue = sorted(
+            [wg_id for wg_id in wg_ids if in_degree[wg_id] == 0],
+            key=title_key,
+        )
+
+        result = []
+        while queue:
+            current = queue.pop(0)
+            result.append(current)
+
+            # Find newly unblocked dependents, sort alphabetically before adding
+            newly_ready = []
+            for succ_id in successors[current]:
+                in_degree[succ_id] -= 1
+                if in_degree[succ_id] == 0:
+                    newly_ready.append(succ_id)
+
+            queue.extend(sorted(newly_ready, key=title_key))
+
+        # Safety: if there's a cycle, append any remaining workgroups at the end
+        if len(result) < len(wg_ids):
+            remaining = [wg_id for wg_id in wg_ids if wg_id not in set(result)]
+            result.extend(sorted(remaining, key=title_key))
+
+        return result
 
     def _empty_budget(self):
         return {"total_budget": 0, "total_spent": 0, "total_invoiced": 0, "remaining": 0}
