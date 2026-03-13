@@ -1,0 +1,7 @@
+The CMS is looking solid — clean layout, real data flowing end-to-end, all three tabs working. That's the hard part done.
+The CVE Intel app has that premium feel because of a few specific things: the dark theme with high-contrast accent colors, the dense data visualization (donut charts, risk gauges, heat bars), and the layered card depth. The CMS is already well-structured to absorb those kinds of upgrades.
+For the next session, here's what would have the most impact:
+High-impact visual upgrades — richer workgroup cards (mini progress rings instead of flat bars), a proper Gantt legend with color-coded dependency lines, and polished stat cards with subtle gradients. The Project Outlook sidebar could get the same treatment as the CVE risk panels — denser, more visual.
+Data visualization — the Budget & Expenses tab is currently a flat table. Adding spend-over-time charts (Recharts is already available), budget donut breakdowns per site, and invoice status distribution would bring it closer to the CVE dashboard density.
+Polish details — micro-interactions on card hover, skeleton loading states instead of spinners, and consistent elevation/shadow language across all components.
+Good stopping point for tonight. Pick it up fresh next session — the architecture is locked in, so it's all visual from here.
