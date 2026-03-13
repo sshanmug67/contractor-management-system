@@ -11,8 +11,8 @@ File layout:
   contractor-management-system/
   ├── config/
   │   └── logger_config.yaml      ← rotation + special logger control
+  ├── logs/                        ← ALL log files written here
   ├── backend/
-  │   ├── logs/                    ← log files written here
   │   └── app/
   │       └── config/
   │           └── logging_config.py  ← THIS FILE
@@ -129,13 +129,16 @@ def get_log_dir():
 
     Priority:
     1. LOG_DIR env var (Docker / production)
-    2. Default: backend/logs/ (local development)
+    2. Default: <repo_root>/logs/ (local development)
+
+    All logs (FastAPI app + Celery workers) write to the same directory
+    at the monorepo root: contractor-management-system/logs/
     """
     log_dir = os.getenv("LOG_DIR")
     if log_dir:
         return log_dir
 
-    return str(get_project_root() / "logs")
+    return str(get_repo_root() / "logs")
 
 
 # ============================================================================
@@ -243,7 +246,7 @@ def setup_logging(
 
     Args:
         log_file_name: Base name for log files (default: "cms")
-        log_dir: Directory for log files (default: backend/logs/)
+        log_dir: Directory for log files (default: <repo_root>/logs/)
         console_level: Logging level for console output
         enable_console: Enable console output
         fresh_start: Delete old logs on startup
@@ -303,7 +306,7 @@ def setup_logging(
     elif os.path.isabs(log_dir):
         full_log_dir = log_dir
     else:
-        full_log_dir = str(get_project_root() / log_dir)
+        full_log_dir = str(get_repo_root() / log_dir)
 
     os.makedirs(full_log_dir, exist_ok=True)
 

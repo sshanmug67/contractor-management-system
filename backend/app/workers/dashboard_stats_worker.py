@@ -19,7 +19,8 @@ import asyncio
 from app.workers.celery_app import app
 from app.workers.worker_logging import worker_log
 from app.cache.redis_client import get_redis_client
-from app.cache.dashboard_cache import set_cached_dashboard_stats
+from app.cache.dashboard_cache import get_cached_dashboard_stats, set_cached_dashboard_stats
+from app.services.portfolio_stats import compute_portfolio_payload
 
 TAG = "DASHBOARD_STATS"
 
@@ -95,7 +96,7 @@ def _refresh_org(providers, org_id: str):
     The repository method is async, so we use asyncio.run()
     since Celery tasks are synchronous (solo pool on Windows).
     """
-    # ── 2. Query database via ProviderRegistry ────────
+    # ── Query single-project dashboard via ProviderRegistry ─
     # providers.dashboard is IDashboardRepository
     # Could be SupabaseDashboardRepo or SQLAlchemyDashboardRepo
     # The worker doesn't know and doesn't care.
@@ -107,7 +108,7 @@ def _refresh_org(providers, org_id: str):
         worker_log(TAG, f"No active project for org {org_id} — skipping cache write")
         return
 
-    # ── 3. Write to Redis L2 cache ────────────────────
+    # ── Write single-project data to Redis L2 cache ───────
     # set_cached_dashboard_stats handles:
     #   - Writing to cms:cache:dashboard_stats:{org_id}
     #   - Setting TTL (10 minutes)
@@ -115,7 +116,6 @@ def _refresh_org(providers, org_id: str):
     success = set_cached_dashboard_stats(org_id, data)
 
     if success:
-        # Log what was cached for debugging
         stats = data.get("stats", {})
         worker_log(
             TAG,
@@ -127,3 +127,77 @@ def _refresh_org(providers, org_id: str):
         )
     else:
         worker_log(TAG, f"Redis write failed for org {org_id} — cache not updated")
+
+    # ── FIX (Bug 2): Refresh portfolio cache for landing page ─
+    # This was defined but never called. The /owner/portfolio
+    # endpoint needs this "portfolio" sub-key in the cache.
+    _refresh_portfolio(providers, org_id)
+
+
+# ── Portfolio-level async queries ─────────────────────────
+# FIX (Bug 1): All async calls are batched into a single
+# asyncio.run() to avoid "attached to a different loop" errors.
+# asyncio.run() creates and tears down an event loop each time.
+# Multiple sequential calls can break if the Supabase client
+# holds references to the first loop's objects.
+
+async def _fetch_portfolio_data(dashboard_repo, org_id: str) -> tuple:
+    """
+    Fetch all portfolio data in a single event loop context.
+
+    This is an async function called via asyncio.run() once,
+    instead of calling asyncio.run() four separate times.
+    """
+    projects = await dashboard_repo.get_portfolio_projects(org_id)
+    pending_invoices = await dashboard_repo.get_pending_invoices(org_id)
+    pending_workgroups = await dashboard_repo.get_pending_workgroups(org_id)
+    recent_activity = await dashboard_repo.get_recent_activity(org_id, limit=10)
+    return projects, pending_invoices, pending_workgroups, recent_activity
+
+
+def _refresh_portfolio(providers, org_id: str):
+    """
+    Refresh portfolio-level stats for the Owner Dashboard landing page.
+
+    Writes a "portfolio" sub-key into the existing cache entry at
+    cms:cache:dashboard_stats:{org_id} so both single-project and
+    portfolio data coexist under one Redis key.
+    """
+    try:
+        # ── FIX (Bug 1): Single asyncio.run() for all queries ─
+        projects, pending_invoices, pending_workgroups, recent_activity = (
+            asyncio.run(
+                _fetch_portfolio_data(providers.dashboard, org_id)
+            )
+        )
+
+        # ── Compute using shared utility ──────────────────
+        # Same compute_portfolio_payload used by the router on cache miss.
+        # Single source of truth — no stat computation drift.
+        portfolio = compute_portfolio_payload(
+            projects=projects,
+            pending_invoices=pending_invoices,
+            pending_workgroups=pending_workgroups,
+            recent_activity=recent_activity,
+            ai_insights=None,  # AI insights come from separate cache key
+        )
+
+        # ── Merge into existing cache entry ───────────────
+        # The single-project data was just written by _refresh_org().
+        # We add the "portfolio" sub-key so both coexist.
+        existing = get_cached_dashboard_stats(org_id) or {}
+        existing["portfolio"] = portfolio
+        set_cached_dashboard_stats(org_id, existing)
+
+        worker_log(
+            TAG,
+            f"Cached portfolio for org {org_id}: "
+            f"{len(projects)} projects, "
+            f"{len(pending_invoices)} pending invoices, "
+            f"{len(pending_workgroups)} pending workgroups"
+        )
+
+    except Exception as exc:
+        worker_log(TAG, f"Portfolio cache failed for org {org_id}: {exc}")
+        # Don't re-raise — let the main worker continue.
+        # The router will fall through to DB on cache miss.

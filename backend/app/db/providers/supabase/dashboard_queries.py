@@ -3,10 +3,15 @@ Dashboard Queries — Implemented
 
 Fetches all data needed for the Owner Dashboard in minimal DB round-trips.
 Assembles the nested structure: Project → Worksites → Workgroups → Jobs.
+
+Also provides portfolio-level queries for the landing page:
+  get_portfolio_projects, get_pending_invoices,
+  get_pending_workgroups, get_recent_activity
 """
 
 from app.db.providers.supabase.base_repository import SupabaseBaseRepository
 from app.db.interfaces.dashboard_repository import IDashboardRepository
+
 
 class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
     """Queries for the owner dashboard."""
@@ -138,7 +143,6 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
             inv_by_wg[wg_id].append(inv)
 
         # Build invoice summary per job
-        # Jobs can have invoice_id set — but also track from invoices table
         def job_invoice_info(job):
             """Determine if a job is invoiced/paid based on its status."""
             return {
@@ -308,3 +312,175 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
 
     def _empty_stats(self):
         return {"worksite_count": 0, "workgroup_count": 0, "wg_active": 0, "wg_pending": 0, "job_count": 0, "jobs_done": 0, "jobs_active": 0}
+
+    # ══════════════════════════════════════════════════════
+    # PORTFOLIO QUERIES (for Owner Dashboard landing page)
+    # ══════════════════════════════════════════════════════
+
+    async def get_portfolio_projects(self, org_id: str) -> list:
+        """
+        Get all projects for an org with aggregated stats.
+        Uses the v_project_overview view (already in schema).
+        """
+        response = (
+            self.client.table("v_project_overview")
+            .select("*")
+            .eq("org_id", org_id)
+            .order("start_date", desc=False)
+            .execute()
+        )
+
+        return [
+            {
+                "id": row["project_id"],
+                "title": row["title"],
+                "status": row["status"],
+                "total_budget": float(row.get("total_budget") or 0),
+                "total_paid": float(row.get("total_paid") or 0),
+                "total_invoiced": float(row.get("total_invoiced") or 0),
+                "progress_pct": float(row.get("progress_pct") or 0),
+                "start_date": row.get("start_date"),
+                "end_date": row.get("end_date"),
+                "worksite_count": int(row.get("worksite_count") or 0),
+                "workgroup_count": int(row.get("workgroup_count") or 0),
+                "job_count": int(row.get("job_count") or 0),
+                "jobs_complete": int(row.get("jobs_complete") or 0),
+            }
+            for row in (response.data or [])
+        ]
+
+    async def get_pending_invoices(self, org_id: str) -> list:
+        """
+        Get invoices awaiting review across all projects for the org.
+
+        Joins through: invoices → contractors, invoices → workgroups → worksites → projects
+        Filters: status in (submitted, ai_validated, ai_flagged, pending_approval)
+        Scoping: RLS on projects table + explicit org_id check below.
+
+        FIX: Uses regular join on contractors (not !inner) so invoices
+        aren't excluded if the contractor FK is somehow null in edge cases.
+        The !inner remains on workgroups/worksites/projects because those
+        are required for org scoping.
+        """
+        response = (
+            self.client.table("invoices")
+            .select(
+                "id, invoice_number, amount, status, submitted_at, "
+                "contractor:contractors(company_name), "
+                "workgroup:workgroups!inner("
+                "  title, trade, "
+                "  worksite:worksites!inner("
+                "    name, "
+                "    project:projects!inner(title, org_id)"
+                "  )"
+                ")"
+            )
+            .in_("status", [
+                "submitted", "ai_validated", "ai_flagged", "pending_approval"
+            ])
+            .order("submitted_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+        results = []
+        for row in (response.data or []):
+            contractor = row.get("contractor") or {}
+            workgroup = row.get("workgroup") or {}
+            worksite = workgroup.get("worksite") or {}
+            project = worksite.get("project") or {}
+
+            # RLS handles org scoping on the projects table,
+            # but double-check in case RLS isn't applied to the view join
+            if project.get("org_id") != org_id:
+                continue
+
+            results.append({
+                "id": row["id"],
+                "invoice_number": row["invoice_number"],
+                "amount": float(row["amount"]),
+                "status": row["status"],
+                "submitted_at": row.get("submitted_at"),
+                "contractor_name": contractor.get("company_name", ""),
+                "workgroup_title": workgroup.get("title", ""),
+                "worksite_name": worksite.get("name", ""),
+                "project_title": project.get("title", ""),
+                "job_title": None,  # TODO: resolve from invoice.line_items
+            })
+
+        return results
+
+    async def get_pending_workgroups(self, org_id: str) -> list:
+        """
+        Get workgroups with status='pending' (awaiting contractor response).
+
+        Joins through: workgroups → contractors, workgroups → worksites → projects
+        Scoping: RLS + explicit org_id check.
+        """
+        response = (
+            self.client.table("workgroups")
+            .select(
+                "id, title, trade, status, "
+                "contractor:contractors(company_name), "
+                "worksite:worksites!inner("
+                "  name, "
+                "  project:projects!inner(org_id)"
+                ")"
+            )
+            .eq("status", "pending")
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        results = []
+        for row in (response.data or []):
+            contractor = row.get("contractor") or {}
+            worksite = row.get("worksite") or {}
+            project = worksite.get("project") or {}
+
+            if project.get("org_id") != org_id:
+                continue
+
+            results.append({
+                "id": row["id"],
+                "title": row["title"],
+                "trade": row.get("trade", ""),
+                "status": row["status"],
+                "contractor_name": contractor.get("company_name", "Unassigned"),
+                "worksite_name": worksite.get("name", ""),
+            })
+
+        return results
+
+    async def get_recent_activity(self, org_id: str, limit: int = 10) -> list:
+        """
+        Get recent audit log entries.
+
+        KNOWN LIMITATION: audit_logs table has no org_id column.
+        This query returns the last N entries globally. In single-org
+        MVP this is fine. For multi-org production, add org_id column:
+
+            ALTER TABLE audit_logs ADD COLUMN org_id UUID REFERENCES organizations(id);
+            CREATE INDEX idx_audit_org ON audit_logs(org_id, created_at DESC);
+
+        Then add .eq("org_id", org_id) to this query.
+        Tracked for: multi-org milestone.
+        """
+        response = (
+            self.client.table("audit_logs")
+            .select("id, entity_type, action, changes, created_at")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        return [
+            {
+                "id": row["id"],
+                "entity_type": row["entity_type"],
+                "action": row["action"],
+                "changes": row.get("changes"),
+                "created_at": row["created_at"],
+            }
+            for row in (response.data or [])
+        ]

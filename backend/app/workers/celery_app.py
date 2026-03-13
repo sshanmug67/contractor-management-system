@@ -4,7 +4,7 @@ CMS Celery Application
 Central Celery configuration with Beat schedule for periodic tasks.
 Broker and result backend use Redis.
 
-Logging: All workers write to backend/logs/celery_workers.log
+Logging: All workers write to logs/celery_workers.log
 via the CMS special logging system. Each task tags its messages
 with [WORKER_NAME] for easy filtering.
 
