@@ -30,6 +30,7 @@ from app.routers import (
     dashboard,
 )
 from app.auth import router as auth_router
+from app.routers import dependency_changes
 
 settings = get_settings()
 
@@ -65,6 +66,7 @@ app.include_router(uploads.router,          prefix="/api/uploads",     tags=["Up
 app.include_router(checkins.router,         prefix="/api/checkins",    tags=["Check-ins"])
 app.include_router(analytics.router,        prefix="/api/analytics",   tags=["Analytics"])
 app.include_router(dashboard.router,        prefix="/api/dashboard",   tags=["Dashboard"])
+app.include_router(dependency_changes.router)
 
 # ── Health Check ──────────────────────────────────────
 @app.get("/api/health", tags=["System"])

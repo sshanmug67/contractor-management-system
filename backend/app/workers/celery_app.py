@@ -17,7 +17,7 @@ import os
 import logging
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_init, task_prerun, task_postrun, task_failure, beat_init, after_setup_logger
+from celery.signals import worker_init, worker_ready, task_prerun, task_postrun, task_failure, beat_init, after_setup_logger
 
 from app.cache.redis_config import get_redis_config
 
@@ -58,6 +58,7 @@ app.conf.update(
         "app.workers.invoice_worker.*": {"queue": "invoices"},
         "app.workers.geo_worker.*": {"queue": "geo"},
         "app.workers.dashboard_stats_worker.*": {"queue": "periodic"},
+        "app.workers.dependency_analysis_worker.*": {"queue": "periodic"},
         "app.workers.insights_worker.*": {"queue": "periodic"},
         "app.workers.verification_worker.*": {"queue": "periodic"},
     },
@@ -70,6 +71,15 @@ app.conf.beat_schedule = {
     "refresh-dashboard-stats": {
         "task": "app.workers.dashboard_stats_worker.refresh_dashboard_stats",
         "schedule": int(os.getenv("CMS_BEAT_DASHBOARD", 300)),
+        "options": {"queue": "periodic"},
+    },
+    # v1.1: Dependency analysis — daily at 5 AM
+    "refresh-dependency-analysis": {
+        "task": "app.workers.dependency_analysis_worker.refresh_dependency_analysis",
+        "schedule": crontab(
+            hour=int(os.getenv("CMS_BEAT_DEPENDENCY_HOUR", 5)),
+            minute=0,
+        ),
         "options": {"queue": "periodic"},
     },
     "generate-ai-insights": {
@@ -103,6 +113,7 @@ app.autodiscover_tasks([
     "app.workers.invoice_worker",
     "app.workers.progress_worker",
     "app.workers.dependency_worker",
+    "app.workers.dependency_analysis_worker",
     "app.workers.geo_worker",
     "app.workers.qr_worker",
     "app.workers.dashboard_stats_worker",
@@ -150,6 +161,28 @@ def on_worker_init(**kwargs):
     logger = _get_celery_logger()
     _log("WORKER", f"Worker started — broker: {redis_config.broker_url}")
     _log("WORKER", f"Queues: {list(app.conf.beat_schedule.keys())}")
+
+
+@worker_ready.connect
+def on_worker_ready(**kwargs):
+    """
+    Pre-warm analysis cache when worker comes online.
+
+    Fires refresh_dependency_analysis (all projects) immediately
+    so the GanttData cache is warm within seconds of startup.
+    No waiting for the 5 AM Beat schedule.
+    """
+    _get_celery_logger()
+    _log("WORKER", "Pre-warming dependency analysis cache on startup")
+    app.send_task(
+        "app.workers.dependency_analysis_worker.refresh_dependency_analysis",
+        queue="periodic",
+    )
+    # Also pre-warm dashboard stats
+    app.send_task(
+        "app.workers.dashboard_stats_worker.refresh_dashboard_stats",
+        queue="periodic",
+    )
 
 
 # ── Beat Startup ──────────────────────────────────────────
@@ -203,6 +236,7 @@ def _task_tag(task_name: str) -> str:
 
     'app.workers.notification_worker.send_notification' → 'NOTIFICATION'
     'app.workers.dashboard_stats_worker.refresh_dashboard_stats' → 'DASHBOARD_STATS'
+    'app.workers.dependency_analysis_worker.refresh_dependency_analysis' → 'DEPENDENCY_ANALYSIS'
     """
     parts = task_name.split(".")
     if len(parts) >= 3:

@@ -2,17 +2,23 @@
 Router — Dependency Analysis Endpoints
 
 Provides endpoints for dependency management and graph analysis:
-  POST /preview          Preview impact of proposed changes
-  POST /apply            Apply validated changes
-  POST /scenarios        Run what-if scenario simulation
-  GET  /graph/{id}       Get project graph (for frontend cache)
-  GET  /health/{id}      Get health snapshot
-  GET  /criticality/{id} Get criticality ranking
+  GET  /gantt/{id}        Full GanttData (cache-first, powers Timeline tab)
+  POST /preview           Preview impact of proposed changes
+  POST /apply             Apply validated changes + invalidate cache
+  POST /scenarios         Run what-if scenario simulation
+  GET  /graph/{id}        Get raw ProjectGraph (for frontend cache)
+  GET  /health/{id}       Get health snapshot (cache-first)
+  GET  /criticality/{id}  Get criticality ranking (cache-first)
+  GET  /parallel/{id}     Get parallel work analysis
+  GET  /bottlenecks/{id}  Get bottleneck detection
+  GET  /conflicts/{id}    Get resource conflicts
+  GET  /cashflow/{id}     Get cash flow projection (cache-first)
+  GET  /forecast/{id}     Get completion forecast
 
-All endpoints follow Pattern 2 from the Dashboard Cache Architecture:
-  - Router handles HTTP, fetches graph via ProviderRegistry
-  - Calls DependencyService (pure logic, no DB)
-  - Returns result to frontend or fires background tasks
+Cache-first pattern (same as dashboard):
+  1. Check Redis L2 cache
+  2. CACHE HIT: Return immediately (~2ms)
+  3. CACHE MISS: Compute live (~200ms), return, backfill cache
 
 File: app/routers/dependency_changes.py
 """
@@ -31,12 +37,26 @@ from app.models.dependency import (
     CriticalityReport,
 )
 from app.services.dependency_analyzer import DependencyService
+from app.cache.dependency_cache import (
+    get_cached_gantt_data,
+    set_cached_gantt_data,
+    get_cached_health_snapshot,
+    set_cached_health_snapshot,
+    get_cached_criticality,
+    set_cached_criticality,
+    get_cached_cashflow,
+    set_cached_cashflow,
+    invalidate_project_analysis,
+)
 
 
 router = APIRouter(
     prefix="/api/dependencies",
-    tags=["dependencies"],
+    tags=["Dependencies"],
 )
+
+# ── Dev org ID — same as dashboard_stats_worker ───────────
+DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 
 
 # ── Helper: fetch graph and build service ─────────────────
@@ -63,6 +83,71 @@ async def _get_service(project_id: str, providers) -> tuple[DependencyService, P
 
 
 # ══════════════════════════════════════════════════════════════
+# GANTT DATA — Full enriched timeline response (cache-first)
+# ══════════════════════════════════════════════════════════════
+
+
+@router.get("/gantt/{project_id}")
+async def get_gantt_data(
+    project_id: str,
+    providers=Depends(get_providers),
+):
+    """
+    Return the full GanttData for the Timeline tab.
+
+    This is the PRIMARY endpoint for the frontend Timeline view.
+    Returns everything: display data (contractor names, progress,
+    invoices) + analysis annotations (critical path, float, tiers,
+    bottlenecks, status messages) + sidebar data (insights,
+    rankings, conflicts, parallel work).
+
+    Cache-first: checks Redis L2 cache before computing.
+    The dependency_analysis_worker pre-warms this cache daily
+    at 5 AM and on every job completion / dependency change.
+    """
+    # ── 1. Check cache ────────────────────────────────────
+    cached = get_cached_gantt_data(project_id)
+    if cached:
+        return cached
+
+    # ── 2. Cache miss — compute live ──────────────────────
+    from app.services.gantt_assembler import assemble_gantt_data
+
+    # Fetch dashboard data (display fields)
+    dashboard_data = await providers.dashboard.get_owner_dashboard(
+        DEV_ORG_ID, project_id=project_id,
+    )
+    if not dashboard_data or not dashboard_data.get("project"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_id}' not found.",
+        )
+
+    # Fetch ProjectGraph (for analysis)
+    graph_dict = await providers.dashboard.get_project_graph(project_id)
+    if not graph_dict or not graph_dict.get("workgroups"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_id}' has no workgroups.",
+        )
+
+    graph = ProjectGraph(**graph_dict)
+
+    # Assemble GanttData (display + all analysis)
+    gantt_data = assemble_gantt_data(
+        dashboard_data=dashboard_data,
+        graph=graph,
+        project_id=project_id,
+        today=date.today(),
+    )
+
+    # ── 3. Backfill cache ─────────────────────────────────
+    set_cached_gantt_data(project_id, gantt_data)
+
+    return gantt_data
+
+
+# ══════════════════════════════════════════════════════════════
 # CHANGE VALIDATION: Preview + Apply
 # ══════════════════════════════════════════════════════════════
 
@@ -75,12 +160,7 @@ async def preview_changes(
     """
     Preview the impact of proposed dependency changes.
 
-    The frontend calls this when the user clicks "Preview Impact"
-    in the Manage Project UI after staging changes.
-
-    Returns validation result (pass/fail) + impact analysis
-    (timeline shifts, critical path changes, affected entities).
-
+    Returns validation result (pass/fail) + impact analysis.
     Does NOT modify the database. Pure analysis only.
     """
     service, graph = await _get_service(batch.project_id, providers)
@@ -103,17 +183,8 @@ async def apply_changes(
     """
     Apply validated dependency changes to the database.
 
-    Re-validates (graph may have changed since preview), then
-    writes changes and fires background cascade.
-
-    Flow:
-      1. Fetch fresh graph (may have changed since preview)
-      2. Re-validate all changes
-      3. Write each change to the database
-      4. Fire background cascade worker
-      5. Return success
-
-    Pattern 2: immediate write + async side effects.
+    Re-validates, writes changes, invalidates cache, and fires
+    background refresh.
     """
     service, graph = await _get_service(batch.project_id, providers)
     result = service.validate_changes(batch)
@@ -130,12 +201,15 @@ async def apply_changes(
         await _apply_change_to_db(providers, change)
         applied_count += 1
 
-    # Fire background cascade (invalidate cache, recalc progress, notify)
+    # Invalidate analysis cache (graph changed)
+    invalidate_project_analysis(batch.project_id)
+
+    # Fire background refresh to rebuild cache
     try:
-        from app.workers.dependency_worker import process_cascade
-        process_cascade.delay(batch.project_id)
+        from app.workers.dependency_analysis_worker import refresh_dependency_analysis
+        refresh_dependency_analysis.delay(batch.project_id)
     except ImportError:
-        pass  # Worker not yet implemented
+        pass  # Worker not yet deployed
 
     return {
         "status": "applied",
@@ -145,26 +219,19 @@ async def apply_changes(
 
 
 async def _apply_change_to_db(providers, change):
-    """
-    Persist a single validated change to the database.
-
-    Uses the appropriate repository methods from ProviderRegistry.
-    Each change type maps to a specific repository call.
-    """
+    """Persist a single validated change to the database."""
     if change.action == "add_wg_dep":
         await providers.workgroups.add_dependency(
-            workgroup_id=change.to_id,          # dependent
-            depends_on_id=change.from_id,       # predecessor
+            workgroup_id=change.to_id,
+            depends_on_id=change.from_id,
         )
     elif change.action == "remove_wg_dep":
-        # Find the dependency record by from/to
         deps = await providers.workgroups.get_dependencies(change.to_id)
         for dep in deps:
             dep_on = dep.get("depends_on_workgroup_id") or dep.get("depends_on", {}).get("id", "")
             if dep_on == change.from_id:
                 await providers.workgroups.remove_dependency(dep["id"])
                 break
-
     elif change.action == "add_job_dep":
         await providers.jobs.add_dependency(
             job_id=change.to_id,
@@ -177,12 +244,10 @@ async def _apply_change_to_db(providers, change):
             if dep_on == change.from_id:
                 await providers.jobs.remove_dependency(dep["id"])
                 break
-
     elif change.action == "remove_workgroup":
         await providers.workgroups.delete_workgroup(change.target_id)
     elif change.action == "remove_job":
         await providers.jobs.delete_job(change.target_id)
-
     elif change.action == "add_workgroup" and change.data:
         await providers.workgroups.create_workgroup(change.data)
     elif change.action == "add_job" and change.data:
@@ -201,12 +266,7 @@ async def run_scenarios(
 ):
     """
     Run what-if delay scenarios and compare results.
-
-    The frontend sends one or more scenarios, each with delay
-    assumptions on specific workgroups/jobs. The service simulates
-    the ripple effect and returns per-scenario impact + comparison.
-
-    This is a read-only analysis — no database changes.
+    Read-only analysis — no database changes.
     """
     service, graph = await _get_service(request.project_id, providers)
     report = service.simulate_scenarios(request.scenarios)
@@ -214,7 +274,7 @@ async def run_scenarios(
 
 
 # ══════════════════════════════════════════════════════════════
-# GRAPH + ANALYSIS ENDPOINTS
+# GRAPH + ANALYSIS ENDPOINTS (cache-first where applicable)
 # ══════════════════════════════════════════════════════════════
 
 
@@ -223,21 +283,10 @@ async def get_project_graph(
     project_id: str,
     providers=Depends(get_providers),
 ):
-    """
-    Return the raw ProjectGraph for a project.
-
-    Used by the frontend to cache the graph locally so it can
-    send it back to preview/scenario endpoints without a round trip.
-    Also useful for debugging.
-    """
+    """Return the raw ProjectGraph for a project."""
     graph_dict = await providers.dashboard.get_project_graph(project_id)
-
     if not graph_dict or not graph_dict.get("workgroups"):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Project '{project_id}' not found or has no workgroups.",
-        )
-
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
     return graph_dict
 
 
@@ -247,15 +296,19 @@ async def get_health_snapshot(
     providers=Depends(get_providers),
 ):
     """
-    Return the health snapshot for a project.
-
-    Includes: critical path, newly unblocked entities, overdue
-    alerts, per-workgroup status messages, and AI insight bullets.
-
-    This powers the Critical Path sidebar and AI Insights panel.
+    Health snapshot — cache-first.
+    Powers the Critical Path sidebar and AI Insights panel.
     """
+    cached = get_cached_health_snapshot(project_id)
+    if cached:
+        return cached
+
     service, graph = await _get_service(project_id, providers)
-    return service.health_snapshot(today=date.today())
+    result = service.health_snapshot(today=date.today())
+
+    # Backfill cache
+    set_cached_health_snapshot(project_id, result.model_dump())
+    return result
 
 
 @router.get("/criticality/{project_id}", response_model=CriticalityReport)
@@ -265,17 +318,20 @@ async def get_criticality_ranking(
     providers=Depends(get_providers),
 ):
     """
-    Return the criticality ranking for a project.
-
-    Ranks every active workgroup by schedule sensitivity.
-    Shows float days, criticality tier, and projected delay
-    impact if the workgroup slips by `delay_days`.
-
-    This powers criticality badges on workgroup cards and the
-    "Focus on X — it's your biggest schedule risk" insight.
+    Criticality ranking — cache-first.
+    Powers criticality badges and "Focus on X" insights.
     """
+    if delay_days == 7:  # Only cache the default
+        cached = get_cached_criticality(project_id)
+        if cached:
+            return cached
+
     service, graph = await _get_service(project_id, providers)
-    return service.criticality_ranking(delay_days=delay_days)
+    result = service.criticality_ranking(delay_days=delay_days)
+
+    if delay_days == 7:
+        set_cached_criticality(project_id, result.model_dump())
+    return result
 
 
 @router.get("/parallel/{project_id}")
@@ -283,12 +339,7 @@ async def get_parallel_work(
     project_id: str,
     providers=Depends(get_providers),
 ):
-    """
-    Return parallel work analysis.
-
-    Shows which workgroups are unblocked but idle — "3 workgroups
-    unblocked, only 1 active."
-    """
+    """Parallel work analysis — which workgroups are unblocked but idle."""
     service, graph = await _get_service(project_id, providers)
     return service.parallel_work_analysis().model_dump()
 
@@ -299,11 +350,7 @@ async def get_bottlenecks(
     threshold: int = 2,
     providers=Depends(get_providers),
 ):
-    """
-    Return bottleneck detection results.
-
-    Identifies workgroups where many dependency paths converge.
-    """
+    """Bottleneck detection — high fan-out convergence nodes."""
     service, graph = await _get_service(project_id, providers)
     return [b.model_dump() for b in service.detect_bottlenecks(threshold=threshold)]
 
@@ -313,11 +360,7 @@ async def get_resource_conflicts(
     project_id: str,
     providers=Depends(get_providers),
 ):
-    """
-    Return resource conflict detection results.
-
-    Identifies contractors assigned to overlapping workgroups.
-    """
+    """Resource conflict detection — same contractor overlapping workgroups."""
     service, graph = await _get_service(project_id, providers)
     return [c.model_dump() for c in service.detect_resource_conflicts()]
 
@@ -327,13 +370,16 @@ async def get_cash_flow(
     project_id: str,
     providers=Depends(get_providers),
 ):
-    """
-    Return cash flow projection.
+    """Cash flow projection — cache-first."""
+    cached = get_cached_cashflow(project_id)
+    if cached:
+        return cached
 
-    Monthly projected invoices based on graph-derived timeline.
-    """
     service, graph = await _get_service(project_id, providers)
-    return service.cash_flow_projection().model_dump()
+    result = service.cash_flow_projection()
+
+    set_cached_cashflow(project_id, result.model_dump())
+    return result
 
 
 @router.get("/forecast/{project_id}")
@@ -341,8 +387,6 @@ async def get_completion_forecast(
     project_id: str,
     providers=Depends(get_providers),
 ):
-    """
-    Return completion forecast based on actual vs estimated performance.
-    """
+    """Completion forecast — actual vs estimated correction."""
     service, graph = await _get_service(project_id, providers)
     return service.completion_forecast().model_dump()
