@@ -15,7 +15,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useDashboard } from "@/hooks/useDashboard";
 import { transformDashboardData } from "@/hooks/dashboardBridge";
-import type { UIDashboard, UIWorkgroup } from "@/hooks/dashboardBridge";
+import type { UIWorkgroup } from "@/hooks/dashboardBridge";
 import { useGanttData } from "@/hooks/ganttBridge";
 
 import { P, css, CalI, ChevLI, BellI, GridI, GanttI, DollarI, TabButton, fmt } from "./components/projectConstants";
