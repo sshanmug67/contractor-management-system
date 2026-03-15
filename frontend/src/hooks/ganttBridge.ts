@@ -51,6 +51,9 @@ export interface UIGanttJob {
   paid: boolean;
   invoiceAmount: number | null;
   dependsOnJobIds: string[];
+  // Computed dates from backend
+  startDate: string | null;
+  endDate: string | null;
   // DAG enrichments
   earliestStart: number;
   earliestFinish: number;
@@ -176,6 +179,8 @@ function transformJob(job: GanttJob): UIGanttJob {
     paid: job.paid,
     invoiceAmount: job.invoice_amount,
     dependsOnJobIds: job.depends_on_job_ids || [],
+    startDate: job.start_date || null,
+    endDate: job.end_date || null,
     earliestStart: job.earliest_start ?? 0,
     earliestFinish: job.earliest_finish ?? 0,
     floatDays: job.float_days ?? 0,

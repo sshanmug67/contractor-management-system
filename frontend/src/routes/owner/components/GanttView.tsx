@@ -22,15 +22,20 @@ interface GanttViewProps {
   g: UIGanttData;
   previewChanges: (changes: ChangeEdge[]) => Promise<PreviewResponse | null>;
   applyChanges: (changes: ChangeEdge[]) => Promise<boolean>;
+  onSimulate?: (workgroupId: string) => void;
+  simulationShifts?: { entityId: string; shiftDays: number }[];
 }
 
-export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
+export function GanttView({ g, previewChanges, applyChanges, onSimulate, simulationShifts = [] }: GanttViewProps) {
   const [exp, setExp] = useState<Set<string>>(new Set(g.worksites[0]?.workgroups.slice(0, 2).map(w => w.id) || []));
   const [hovered, setHovered] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; sub?: string; budget?: string; paid?: string; invoiced?: string; progress?: string; floatInfo?: string; critical?: boolean; bottleneck?: string; msg?: string } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [rightW, setRightW] = useState(0);
+
+  // Right-click context menu
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; wgId: string } | null>(null);
 
   // Dep drag-and-drop
   const [depDrag, setDepDrag] = useState<{ fromJobId: string; fromX: number; fromY: number; curX: number; curY: number } | null>(null);
@@ -88,6 +93,7 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
   const wgBarPos = new Map<string, BarPos>();
   const jobBarPos = new Map<string, BarPos>();
   const jobToWgId = new Map<string, string>();
+  const jobEndDateMap = new Map<string, string>(); // job_id → end date string
   interface JobDepEdge { fromJobId: string; toJobId: string; }
   const jobDepEdges: JobDepEdge[] = [];
   const floatBars: { wgId: string; endPct: number; floatEndPct: number; y: number; floatDays: number }[] = [];
@@ -111,10 +117,18 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
       const wStart = wg.startDate ? new Date(wg.startDate).getTime() : tS;
       wg.jobs.forEach((job: UIGanttJob) => {
         jobToWgId.set(job.id, wg.id);
-        const dayOff = wg.jobs.slice(0, job.sequence - 1).reduce((a: number, j: UIGanttJob) => a + j.durationDays, 0);
-        const jS = new Date(wStart + dayOff * 864e5);
-        const jE = new Date(jS.getTime() + job.durationDays * 864e5);
+        // Use backend-computed dates if available, fallback to cumulative calculation
+        let jS: Date, jE: Date;
+        if (job.startDate && job.endDate) {
+          jS = new Date(job.startDate);
+          jE = new Date(job.endDate);
+        } else {
+          const dayOff = wg.jobs.slice(0, job.sequence - 1).reduce((a: number, j: UIGanttJob) => a + j.durationDays, 0);
+          jS = new Date(wStart + dayOff * 864e5);
+          jE = new Date(jS.getTime() + job.durationDays * 864e5);
+        }
         const jL = d2p(jS), jR = d2p(jE);
+        jobEndDateMap.set(job.id, jE.toISOString().slice(0, 10));
         if (exp.has(wg.id)) {
           jobBarPos.set(job.id, { left: jL, right: jR, yCenterPx: yOff + JOB_ROW_H / 2 });
           yOff += JOB_ROW_H;
@@ -262,6 +276,26 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
                 </g>);
               })}
 
+              {/* ★ Ghost bars: show where WG bars would shift during simulation */}
+              {simulationShifts.length > 0 && simulationShifts.map(shift => {
+                const pos = wgBarPos.get(shift.entityId);
+                if (!pos || shift.shiftDays <= 0) return null;
+                const shiftPx = (shift.shiftDays / ((tE - tS) / 864e5)) * rightW;
+                const barX = (pos.left / 100) * rightW + shiftPx;
+                const barW = ((pos.right - pos.left) / 100) * rightW;
+                if (barX + barW > rightW + 20) return null; // offscreen
+                return (
+                  <g key={`ghost-${shift.entityId}`} opacity="0.6">
+                    <rect x={barX} y={pos.yCenterPx - 12} width={barW} height={24} rx={8}
+                      fill="rgba(124,58,237,0.08)" stroke="#7C3AED" strokeWidth="1.5" strokeDasharray="5,3" />
+                    <text x={barX + barW / 2} y={pos.yCenterPx + 3} textAnchor="middle"
+                      fontSize="8" fontWeight="700" fill="#7C3AED" fontFamily="'Outfit',sans-serif">
+                      +{shift.shiftDays}d
+                    </text>
+                  </g>
+                );
+              })}
+
               {/* Dep arrows — ★ ENHANCEMENT 1: Critical links are red */}
               {depCurves.map(dep => {
                 const isPending = dep.level === 'pending';
@@ -315,7 +349,9 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
 
                   return (
                     <div key={wg.id} style={{ animation: `si .3s ${wi * 70 + wgi * 45 + 60}ms both` }}>
-                      <div className="gantt-wg-row" onClick={() => toggleExp(wg.id)} onMouseEnter={() => setHovered(wg.id)} onMouseLeave={() => setHovered(null)}
+                      <div className="gantt-wg-row" onClick={() => { setCtxMenu(null); toggleExp(wg.id); }}
+                        onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, wgId: wg.id }); }}
+                        onMouseEnter={() => setHovered(wg.id)} onMouseLeave={() => setHovered(null)}
                         style={{ display: "flex", alignItems: "center", height: ROW_H, borderBottom: `1px solid ${isE ? "#C4B5A2" : "#ECEAE6"}`, cursor: "pointer", background: isH ? "#FAF9F6" : isE ? "#FAFAF8" : "transparent", transition: "background .15s" }}>
                         <div style={{ width: LEFT_W, flexShrink: 0, padding: "0 14px", display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontSize: 10, color: "#9C8E7C", width: 12, textAlign: "center", flexShrink: 0, transition: "transform .2s", transform: isE ? "rotate(90deg)" : "none" }}>▶</span>
@@ -362,8 +398,11 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
                             <div style={{ height: "100%", width: `${pc}%`, background: isCritActive ? P.crit.grad : sm.p.grad, borderRadius: 7, transition: "width .7s ease" }} />
                             {wg.status === "in_progress" && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg,transparent 25%,rgba(255,255,255,0.25) 50%,transparent 75%)", backgroundSize: "200% 100%", animation: "sh 2s infinite" }} />}
                           </div>
-                          {/* ★ REFINEMENT 4: Completion label positioned AFTER float bar end */}
-                          <span style={{ position: "absolute", fontSize: 11, fontWeight: 800, zIndex: 10, left: `${Math.min(labelPct, 96)}%`, color: isCritActive ? P.crit.fg : sm.p.fg }}>{dn}/{wg.jobs.length}</span>
+                          {/* Completion label + end date positioned AFTER float bar end */}
+                          <span style={{ position: "absolute", fontSize: 11, fontWeight: 800, zIndex: 10, left: `${Math.min(labelPct, 96)}%`, color: isCritActive ? P.crit.fg : sm.p.fg, whiteSpace: "nowrap" }}>
+                            {dn}/{wg.jobs.length}
+                            {wg.endDate && <span style={{ fontSize: 9, fontWeight: 600, color: "#9C8E7C", marginLeft: 4 }}>{fmtD(wg.endDate)}</span>}
+                          </span>
                           {wg.status === "complete" && <div style={{ position: "absolute", zIndex: 10, left: `${e}%`, top: "50%", transform: "translate(-50%, -50%) rotate(45deg)", width: 10, height: 10, background: sm.p.fg, border: "2px solid #fff", boxShadow: `0 0 0 1px ${sm.p.fg}` }} />}
                         </div>
                       </div>
@@ -393,7 +432,7 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
                             <div style={{ flex: 1, position: "relative", height: "100%", display: "flex", alignItems: "center" }}>
                               {months.map((m, i) => i > 0 ? <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${m.left}%`, borderLeft: "1px solid rgba(0,0,0,0.03)" }} /> : null)}
                               <div
-                                onMouseEnter={(ev) => setTooltip({ x: ev.clientX, y: ev.clientY, title: job.title, sub: `${job.durationDays} days · ${fmt(job.budget)}`, paid: job.paid ? "Paid" : undefined, invoiced: job.invoiced && !job.paid ? "Invoiced" : undefined, floatInfo: job.floatDays > 0 ? `${job.floatDays}d float` : undefined })}
+                                onMouseEnter={(ev) => setTooltip({ x: ev.clientX, y: ev.clientY, title: job.title, sub: `${job.durationDays} days · ${fmt(job.budget)}${job.startDate ? ` · ${fmtD(job.startDate)} → ${job.endDate ? fmtD(job.endDate) : '?'}` : ''}`, paid: job.paid ? "Paid" : undefined, invoiced: job.invoiced && !job.paid ? "Invoiced" : undefined, floatInfo: job.floatDays > 0 ? `${job.floatDays}d float` : undefined })}
                                 onMouseMove={(ev) => setTooltip(prev => prev ? { ...prev, x: ev.clientX, y: ev.clientY } : null)}
                                 onMouseLeave={() => setTooltip(null)}
                                 style={{
@@ -412,7 +451,13 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
                               {/* ★ ENHANCEMENT 3: Dep drag handle on ALL job bars */}
                               <div className="dep-handle" onMouseDown={(e) => startDepDrag(e, job.id)} style={{ position: "absolute", left: `${jR}%`, top: "50%", transform: "translate(-50%,-50%)", width: 10, height: 10, borderRadius: "50%", background: "#7C3AED", border: "2px solid #fff", boxShadow: "0 1px 4px rgba(0,0,0,0.2)", zIndex: 20, pointerEvents: "auto", cursor: "crosshair" }} />
 
-                              {(job.paid || job.invoiced) && <span style={{ position: "absolute", fontSize: 9, fontWeight: 700, left: `${Math.min(jL + jW + 0.5, 95)}%`, color: job.paid ? "#2E7D5F" : "#C07B1A", zIndex: 8 }}>{job.paid ? "Paid" : "Inv'd"}</span>}
+                              {/* End date + payment status after job bar */}
+                              <span style={{ position: "absolute", fontSize: 9, fontWeight: 600, left: `${Math.min(jL + jW + 0.5, 93)}%`, color: "#9C8E7C", zIndex: 8, whiteSpace: "nowrap" }}>
+                                {job.paid ? <span style={{ color: "#2E7D5F", fontWeight: 700 }}>Paid</span>
+                                  : job.invoiced ? <span style={{ color: "#C07B1A", fontWeight: 700 }}>Inv'd</span>
+                                  : null}
+                                {jobEndDateMap.get(job.id) && <span style={{ marginLeft: job.paid || job.invoiced ? 4 : 0 }}>{fmtD(jobEndDateMap.get(job.id)!)}</span>}
+                              </span>
                             </div>
                           </div>
                         );
@@ -428,7 +473,7 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
       </div>
 
       {/* Rich tooltip with bottleneck info */}
-      {tooltip && (
+      {tooltip && !ctxMenu && (
         <div style={{ position: "fixed", left: tooltip.x + 14, top: tooltip.y - 10, padding: "10px 14px", borderRadius: 12, background: "#1A1814", color: "#fff", fontSize: 12, fontWeight: 600, boxShadow: "0 12px 32px rgba(0,0,0,0.3)", zIndex: 1000, pointerEvents: "none", maxWidth: 320, minWidth: 180 }}>
           <div style={{ fontWeight: 800, marginBottom: 3 }}>{tooltip.title}</div>
           {tooltip.sub && <div style={{ fontSize: 11, color: "#9C8E7C", marginBottom: 6 }}>{tooltip.sub}</div>}
@@ -443,6 +488,42 @@ export function GanttView({ g, previewChanges, applyChanges }: GanttViewProps) {
           {tooltip.bottleneck && <div style={{ marginTop: 3, fontSize: 10, fontWeight: 700, color: "#C4B5FF" }}>⚠ {tooltip.bottleneck}</div>}
           {tooltip.msg && <div style={{ marginTop: 3, fontSize: 10, color: "#a8a29e", fontStyle: "italic" }}>{tooltip.msg}</div>}
         </div>
+      )}
+
+      {/* Right-click context menu */}
+      {ctxMenu && (
+        <>
+          {/* Click-away backdrop */}
+          <div onClick={() => setCtxMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1100 }} />
+          {/* Menu */}
+          <div style={{
+            position: "fixed", left: ctxMenu.x, top: ctxMenu.y, zIndex: 1200,
+            padding: "4px 0", borderRadius: 10, background: "#fff",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.15), 0 1px 4px rgba(0,0,0,0.1)",
+            border: "1px solid #ECEAE6", minWidth: 180,
+            animation: "scaleIn .12s ease both",
+          }}>
+            <button onClick={() => { if (onSimulate) onSimulate(ctxMenu.wgId); setCtxMenu(null); }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(124,58,237,0.06)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#7C3AED", fontFamily: "'Outfit', sans-serif", textAlign: "left" }}>
+              <span style={{ fontSize: 14 }}>⏱</span> Simulate delay...
+            </button>
+            <button onClick={() => { toggleExp(ctxMenu.wgId); setCtxMenu(null); }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(0,0,0,0.03)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#5C5043", fontFamily: "'Outfit', sans-serif", textAlign: "left" }}>
+              <span style={{ fontSize: 14 }}>◇</span> {exp.has(ctxMenu.wgId) ? "Collapse jobs" : "Expand jobs"}
+            </button>
+            <div style={{ height: 1, background: "#F0EDE8", margin: "4px 8px" }} />
+            <button onClick={() => setCtxMenu(null)}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(0,0,0,0.03)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#8C7E6A", fontFamily: "'Outfit', sans-serif", textAlign: "left" }}>
+              <span style={{ fontSize: 14 }}>✕</span> Cancel
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

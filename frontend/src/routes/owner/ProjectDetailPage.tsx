@@ -15,7 +15,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useDashboard } from "@/hooks/useDashboard";
 import { transformDashboardData } from "@/hooks/dashboardBridge";
-import type { UIWorkgroup } from "@/hooks/dashboardBridge";
+import type { UIDashboard, UIWorkgroup } from "@/hooks/dashboardBridge";
 import { useGanttData } from "@/hooks/ganttBridge";
 
 import { P, css, CalI, ChevLI, BellI, GridI, GanttI, DollarI, TabButton, fmt } from "./components/projectConstants";
@@ -25,11 +25,14 @@ import { CardView } from "./components/CardView";
 import { ProjectOutlook } from "./components/ProjectOutlook";
 import { BudgetExpensesView } from "./components/BudgetExpensesView";
 import { WorkgroupDrawer } from "./components/WorkgroupDrawer";
+import { ScenarioPanel } from "./components/ScenarioPanel";
 
 export function ProjectDetailPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"overview" | "timeline" | "budget">("overview");
   const [drawerWg, setDrawerWg] = useState<UIWorkgroup | null>(null);
+  const [simulatingWgId, setSimulatingWgId] = useState<string | null>(null);
+  const [simulationShifts, setSimulationShifts] = useState<{entityId: string; shiftDays: number}[]>([]);
   const [ready, setReady] = useState(false);
   useEffect(() => { requestAnimationFrame(() => setReady(true)); }, []);
 
@@ -133,7 +136,7 @@ export function ProjectDetailPage() {
 
         {activeTab === "timeline" && (
           ganttData
-            ? <GanttView g={ganttData} previewChanges={previewChanges} applyChanges={applyChanges} />
+            ? <GanttView g={ganttData} previewChanges={previewChanges} applyChanges={applyChanges} onSimulate={(wgId) => setSimulatingWgId(wgId)} simulationShifts={simulationShifts} />
             : ganttLoading
               ? <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <div style={{ textAlign: "center" }}>
@@ -156,7 +159,11 @@ export function ProjectDetailPage() {
 
         {/* Sidebars */}
         {activeTab === "overview" && <ProjectOutlook d={d} />}
-        {activeTab === "timeline" && ganttData && <GanttOutlook g={ganttData} />}
+        {activeTab === "timeline" && ganttData && (
+          simulatingWgId
+            ? <ScenarioPanel g={ganttData} workgroupId={simulatingWgId} onClose={() => { setSimulatingWgId(null); setSimulationShifts([]); }} onShiftsChanged={setSimulationShifts} />
+            : <GanttOutlook g={ganttData} />
+        )}
       </div>
 
       {/* Drawer */}

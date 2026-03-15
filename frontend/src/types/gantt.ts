@@ -24,6 +24,9 @@ export interface GanttJob {
   paid: boolean;
   invoice_amount: number | null;
   depends_on_job_ids: string[];
+  // ── Computed dates from backend ──
+  start_date: string | null;   // ISO date, computed from WG start + cumulative sequence
+  end_date: string | null;
   // ── DAG analysis enrichments ──
   earliest_start: number;   // days from project start
   earliest_finish: number;
@@ -247,22 +250,37 @@ export interface ScenarioRequest {
   project_id: string;
   scenarios: {
     name: string;
-    workgroup_id: string;
-    delay_days: number;
+    delays: {
+      entity_id: string;
+      entity_type: "workgroup" | "job";
+      delay_days: number;
+    }[];
   }[];
   graph: ProjectGraph;
 }
 
 export interface ScenarioResult {
-  name: string;
-  workgroup_id: string;
-  delay_days: number;
-  new_duration: number;
-  duration_delta: number;
-  critical_path_changed: boolean;
-  downstream_affected: string[];
+  scenario_name: string;
+  original_end_date: string | null;
+  projected_end_date: string | null;
+  original_duration_days: number;
+  projected_duration_days: number;
+  delta_days: number;
+  critical_path: string[];
+  shifts: {
+    entity_id: string;
+    title: string;
+    entity_type: string;
+    old_earliest_start: number;
+    new_earliest_start: number;
+    shift_days: number;
+  }[];
+  absorbed_by: string[];
+  propagated_through: string[];
+  cost_impact: number | null;
 }
 
 export interface ScenarioResponse {
-  results: ScenarioResult[];
+  scenarios: ScenarioResult[];
+  summary?: string;
 }

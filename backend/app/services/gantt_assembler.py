@@ -138,18 +138,50 @@ def assemble_gantt_data(
             float_days = wg_floats.get(wg_id, 0)
             is_crit = wg_id in wg_critical_set
 
-            # Enrich jobs
+            # Enrich jobs with computed start/end dates
+            # Jobs run sequentially within a WG based on their sequence number.
+            # Each job's start = WG start + sum(durations of all preceding jobs).
             enriched_jobs = []
             total_job_days = 0
-            for job in wg.get("jobs", []):
+
+            # Sort jobs by sequence to ensure correct date accumulation
+            sorted_jobs = sorted(
+                wg.get("jobs", []),
+                key=lambda j: j.get("sequence", 0) or 0,
+            )
+
+            # Parse WG start date once
+            wg_start_str = wg.get("start_date")
+            wg_start_dt = None
+            if wg_start_str:
+                try:
+                    wg_start_dt = date.fromisoformat(str(wg_start_str))
+                except (ValueError, TypeError):
+                    pass
+
+            cumulative_days = 0
+            for job in sorted_jobs:
                 job_id = job["id"]
                 j_sched = job_schedule.get(job_id)
                 j_float = job_floats.get(job_id)
                 j_is_crit = job_id in job_critical_set
-                total_job_days += job.get("est_duration_days", 0) or 0
+                duration = job.get("est_duration_days", 0) or 0
+                total_job_days += duration
+
+                # Compute this job's start and end dates
+                job_start_date = None
+                job_end_date = None
+                if wg_start_dt and duration > 0:
+                    job_start_date = str(wg_start_dt + timedelta(days=cumulative_days))
+                    job_end_date = str(wg_start_dt + timedelta(days=cumulative_days + duration))
+
+                cumulative_days += duration
 
                 enriched_job = {
                     **job,
+                    # Computed dates
+                    "start_date": job_start_date,
+                    "end_date": job_end_date,
                     # Analysis annotations
                     "earliest_start": j_sched.earliest_start if j_sched else None,
                     "earliest_finish": j_sched.earliest_finish if j_sched else None,
