@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef, type ReactNode, type SVGProps } from "react";
+import { useState, useEffect, useRef, useCallback, type ReactNode, type SVGProps } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useDashboard } from "@/hooks/useDashboard";
 import { transformDashboardData } from "@/hooks/dashboardBridge";
 import type { UIDashboard, UIWorkgroup, UIJob } from "@/hooks/dashboardBridge";
-
+import { useGanttData } from "@/hooks/ganttBridge";
+import type { UIGanttData, UIGanttWorkgroup, UIGanttJob } from "@/hooks/ganttBridge";
+import type { ChangeEdge, PreviewResponse } from "@/types/gantt";
 /* ═══════════════════ TYPES ═══════════════════ */
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'd'> { d: ReactNode | string; size?: number; color?: string; sw?: number; }
 type IP = Omit<IconProps, 'd'>;
@@ -80,6 +82,7 @@ const DEFAULT_TRADE: TradeInfo = { Icon: HammerI, c: "#8C7E6A", bg: "#F5F3EF", r
 const fmt = (n: number): string => n >= 1000 ? `$${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K` : `$${n}`;
 const fmtFull = (n: number): string => `$${n.toLocaleString()}`;
 
+
 const css = `
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 *{font-family:'Outfit',system-ui,sans-serif!important;box-sizing:border-box;margin:0}
@@ -92,9 +95,10 @@ const css = `
 @keyframes drawerIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
 @keyframes scaleIn{from{opacity:0;transform:scale(0.97)}to{opacity:1;transform:scale(1)}}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes critPulse{0%,100%{box-shadow:0 0 0 2px rgba(212,74,46,0.12)}50%{box-shadow:0 0 12px rgba(212,74,46,0.35)}}
 ::-webkit-scrollbar{width:10px}::-webkit-scrollbar-track{background:#F0EDE8;border-radius:5px}::-webkit-scrollbar-thumb{background:#C4B5A2;border-radius:5px;border:2px solid #F0EDE8}::-webkit-scrollbar-thumb:hover{background:#A89880}
+.dep-handle{opacity:0;transition:opacity .15s;cursor:crosshair}
 `;
-
 /* ═══════════════════ SHARED COMPONENTS (unchanged) ═══════════════════ */
 const Badge = ({ status }: { status: string }) => { const m = SM[status] || SM.draft; return <span style={{ display: "inline-flex", padding: "2px 7px", borderRadius: 5, fontSize: 9, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", background: m.p.grad, color: "#fff" }}>{m.label}</span>; };
 const BudgetBar = ({ spent, invoiced, total, h = 5 }: { spent: number; invoiced: number; total: number; h?: number }) => { const t = total || 1; const sp = (spent / t) * 100, ip = (invoiced / t) * 100; return <div style={{ height: h, borderRadius: 10, overflow: "hidden", display: "flex", background: "#DDD7CC" }}>{sp > 0 && <div style={{ height: "100%", width: `${sp}%`, background: P.done.grad, transition: "width .6s" }} />}{ip > 0 && <div style={{ height: "100%", width: `${ip}%`, background: P.pending.grad, transition: "width .6s" }} />}</div>; };
@@ -208,18 +212,28 @@ function WorkgroupDrawer({ wg, allWg, onClose }: { wg: UIWorkgroup; allWg: UIWor
   );
 }
 
-/* ═══════════════════ GANTT VIEW (unchanged from original) ═══════════════════ */
-function GanttView({ d }: { d: UIDashboard }) {
-  const [exp, setExp] = useState<Set<string>>(new Set(d.worksites[0]?.workgroups.slice(0, 2).map(w => w.id) || []));
+/* ═══════════════════ GANTT VIEW — ENHANCED (consumes UIGanttData from /api/dependencies/gantt) ═══════════════════ */
+function GanttView({ g, previewChanges, applyChanges }: {
+  g: UIGanttData;
+  previewChanges: (changes: ChangeEdge[]) => Promise<PreviewResponse | null>;
+  applyChanges: (changes: ChangeEdge[]) => Promise<boolean>;
+}) {
+  const [exp, setExp] = useState<Set<string>>(new Set(g.worksites[0]?.workgroups.slice(0, 2).map(w => w.id) || []));
   const [hovered, setHovered] = useState<string | null>(null);
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; sub?: string; budget?: string; paid?: string; invoiced?: string; progress?: string; floatInfo?: string; critical?: boolean; msg?: string } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const [rightW, setRightW] = useState(0);
+
+  // Dep drag-and-drop
+  const [depDrag, setDepDrag] = useState<{ fromJobId: string; fromX: number; fromY: number; curX: number; curY: number } | null>(null);
+  const [pendingDeps, setPendingDeps] = useState<ChangeEdge[]>([]);
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
 
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
-    const measure = () => setRightW(el.clientWidth - 280);
+    const measure = () => setRightW(el.clientWidth - 290);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -228,504 +242,334 @@ function GanttView({ d }: { d: UIDashboard }) {
 
   /* ── Dynamic date range ── */
   const allDates: number[] = [];
-  d.worksites.forEach(ws => ws.workgroups.forEach(wg => {
+  g.worksites.forEach(ws => ws.workgroups.forEach(wg => {
     if (wg.startDate) allDates.push(new Date(wg.startDate).getTime());
     if (wg.endDate) allDates.push(new Date(wg.endDate).getTime());
+    if (wg.endDate && wg.floatDays > 0) allDates.push(new Date(wg.endDate).getTime() + wg.floatDays * 864e5);
   }));
-  if (d.projectStartDate) allDates.push(new Date(d.projectStartDate).getTime());
-  if (d.projectEndDate) allDates.push(new Date(d.projectEndDate).getTime());
+  if (g.projectStartDate) allDates.push(new Date(g.projectStartDate).getTime());
+  if (g.projectEndDate) allDates.push(new Date(g.projectEndDate).getTime());
   allDates.push(Date.now());
-  const minDate = Math.min(...allDates);
-  const maxDate = Math.max(...allDates);
-  // Add 15-day padding on each side, then round to month boundaries
+  const minDate = Math.min(...allDates), maxDate = Math.max(...allDates);
   const padMs = 15 * 864e5;
-  const rangeStart = new Date(minDate - padMs);
-  rangeStart.setDate(1); // Start of month
-  const rangeEnd = new Date(maxDate + padMs);
-  rangeEnd.setMonth(rangeEnd.getMonth() + 1, 1); // Start of next month
-  const tS = rangeStart.getTime();
-  const tE = rangeEnd.getTime();
-  const tR = tE - tS;
-  const d2p = (dt: string | Date): number => {
-    const t = typeof dt === "string" ? new Date(dt).getTime() : dt.getTime();
-    return Math.max(0, Math.min(100, ((t - tS) / tR) * 100));
-  };
+  const rangeStart = new Date(minDate - padMs); rangeStart.setDate(1);
+  const rangeEnd = new Date(maxDate + padMs); rangeEnd.setMonth(rangeEnd.getMonth() + 1, 1);
+  const tS = rangeStart.getTime(), tE = rangeEnd.getTime(), tR = tE - tS;
+  const d2p = (dt: string | Date): number => { const t = typeof dt === "string" ? new Date(dt).getTime() : dt.getTime(); return Math.max(0, Math.min(100, ((t - tS) / tR) * 100)); };
 
-  // Generate month labels
   const months: { label: string; left: number; width: number }[] = [];
   const cur = new Date(rangeStart);
   while (cur.getTime() < tE) {
     const mStart = cur.getTime();
     const next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     const mEnd = Math.min(next.getTime(), tE);
-    months.push({
-      label: cur.toLocaleDateString("en-US", { month: "short", year: "numeric" }),
-      left: ((mStart - tS) / tR) * 100,
-      width: ((mEnd - mStart) / tR) * 100,
-    });
+    months.push({ label: cur.toLocaleDateString("en-US", { month: "short", year: "numeric" }), left: ((mStart - tS) / tR) * 100, width: ((mEnd - mStart) / tR) * 100 });
     cur.setMonth(cur.getMonth() + 1);
   }
-
-  // Today marker
   const todayPct = d2p(new Date());
 
-  const LEFT_W = 280;
+  const LEFT_W = 290;
   const ROW_H = 42;
   const JOB_ROW_H = 34;
   const SITE_ROW_H = 36;
+  const toggleExp = (id: string) => { setExp(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
+  const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-  const toggleExp = (id: string) => {
-    setExp(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
-  // ── Pre-compute all bar positions (workgroups AND jobs) for dependency overlay ──
-  // Job bar geometry: same logic as the render loop, but computed upfront
+  // ── Pre-compute bar positions ──
   interface BarPos { left: number; right: number; yCenterPx: number; }
   const wgBarPos = new Map<string, BarPos>();
   const jobBarPos = new Map<string, BarPos>();
-  // Track which workgroup each job belongs to (for collapsed fallback)
   const jobToWgId = new Map<string, string>();
-  // Collect all job dependency edges
   interface JobDepEdge { fromJobId: string; toJobId: string; }
   const jobDepEdges: JobDepEdge[] = [];
 
+  // Track float bar positions for SVG overlay
+  const floatBars: { wgId: string; endPct: number; floatEndPct: number; y: number; floatDays: number }[] = [];
+
   let yOff = 0;
-  d.worksites.forEach(ws => {
-    yOff += SITE_ROW_H; // site header
+  g.worksites.forEach(ws => {
+    yOff += SITE_ROW_H;
     ws.workgroups.forEach(wg => {
       const wgYCenter = yOff + ROW_H / 2;
       const wgS = wg.startDate ? d2p(wg.startDate) : 0;
       const wgE = wg.endDate ? d2p(wg.endDate) : wgS + 4;
       wgBarPos.set(wg.id, { left: wgS, right: wgE, yCenterPx: wgYCenter });
-      yOff += ROW_H; // workgroup row
 
-      // Compute each job's bar position
+      // Float bars
+      if (wg.floatDays > 0 && wg.endDate) {
+        const floatEndDate = new Date(new Date(wg.endDate).getTime() + wg.floatDays * 864e5);
+        floatBars.push({ wgId: wg.id, endPct: wgE, floatEndPct: d2p(floatEndDate), y: yOff, floatDays: wg.floatDays });
+      }
+
+      yOff += ROW_H;
       const wStart = wg.startDate ? new Date(wg.startDate).getTime() : tS;
-      wg.jobs.forEach((job: UIJob, ji: number) => {
+      wg.jobs.forEach((job: UIGanttJob) => {
         jobToWgId.set(job.id, wg.id);
-
-        const dayOff = wg.jobs.slice(0, job.sequence - 1).reduce((a: number, j: UIJob) => a + j.durationDays, 0);
+        const dayOff = wg.jobs.slice(0, job.sequence - 1).reduce((a: number, j: UIGanttJob) => a + j.durationDays, 0);
         const jS = new Date(wStart + dayOff * 864e5);
         const jE = new Date(jS.getTime() + job.durationDays * 864e5);
-        const jL = d2p(jS);
-        const jR = d2p(jE);
-
+        const jL = d2p(jS), jR = d2p(jE);
         if (exp.has(wg.id)) {
-          // Expanded: job has its own row
-          const jobYCenter = yOff + JOB_ROW_H / 2;
-          jobBarPos.set(job.id, { left: jL, right: jR, yCenterPx: jobYCenter });
+          jobBarPos.set(job.id, { left: jL, right: jR, yCenterPx: yOff + JOB_ROW_H / 2 });
           yOff += JOB_ROW_H;
         } else {
-          // Collapsed: job maps to the workgroup bar's Y position
           jobBarPos.set(job.id, { left: jL, right: jR, yCenterPx: wgYCenter });
         }
-
-        // Collect dependency edges from this job
-        const deps: string[] = job.dependsOnJobIds || [];
-        deps.forEach((predJobId: string) => {
-          jobDepEdges.push({ fromJobId: predJobId, toJobId: job.id });
-        });
+        (job.dependsOnJobIds || []).forEach(predJobId => { jobDepEdges.push({ fromJobId: predJobId, toJobId: job.id }); });
       });
     });
   });
   const totalContentH = yOff;
 
-  // ── Build stepped connector paths for each dependency edge ──
-  // Pattern: exit right → drop down → enter right (with rounded corners)
-  // This is the standard Gantt dependency line style (MS Project, Monday, etc.)
-  interface DepCurve {
-    key: string;
-    path: string;
-    x1: number; y1: number;
-    x2: number; y2: number;
-    isCrossWg: boolean;
-    level: 'job' | 'workgroup';
-  }
+  // ── Dependency curves ──
+  interface DepCurve { key: string; path: string; x1: number; y1: number; x2: number; y2: number; isCrossWg: boolean; level: string; }
   const depCurves: DepCurve[] = [];
-
-  const CORNER_R = 6; // corner radius for the stepped connectors
-  const EXIT_GAP = 10; // horizontal gap before dropping down
-
-  /** Build a stepped connector path from (x1,y1) to (x2,y2) */
+  const CORNER_R = 6, EXIT_GAP = 10;
   function buildConnectorPath(x1: number, y1: number, x2: number, y2: number): string {
-    const dy = y2 - y1;
-    const absDy = Math.abs(dy);
-
-    // Same row — simple horizontal line
-    if (absDy < 2) {
-      return `M ${x1},${y1} L ${x2},${y2}`;
-    }
-
-    const dirY = dy > 0 ? 1 : -1; // 1 = downward, -1 = upward
-    const r = Math.min(CORNER_R, absDy / 2); // clamp radius if rows are very close
-
-    // Determine the X position for the vertical segment
-    // Place it just after the predecessor bar end
-    const midX = x1 + EXIT_GAP;
-
-    // If target is to the right of our vertical segment (normal case)
-    if (x2 > midX + r * 2) {
-      return [
-        `M ${x1},${y1}`,                                          // start
-        `L ${midX},${y1}`,                                        // exit right
-        `Q ${midX + r},${y1} ${midX + r},${y1 + dirY * r}`,      // corner: turn into vertical
-        `L ${midX + r},${y2 - dirY * r}`,                         // vertical drop
-        `Q ${midX + r},${y2} ${midX + r + r},${y2}`,              // corner: turn into horizontal
-        `L ${x2},${y2}`,                                          // enter target
-      ].join(' ');
-    }
-
-    // Target is close to or left of the vertical — use a wider midpoint
-    const safeX = Math.max(x1 + EXIT_GAP, x2 - EXIT_GAP);
-    const cpX = safeX + r;
-    return [
-      `M ${x1},${y1}`,
-      `L ${safeX},${y1}`,
-      `Q ${cpX},${y1} ${cpX},${y1 + dirY * r}`,
-      `L ${cpX},${y2 - dirY * r}`,
-      `Q ${cpX},${y2} ${cpX + r},${y2}`,
-      `L ${x2},${y2}`,
-    ].join(' ');
+    const dy = y2 - y1, absDy = Math.abs(dy);
+    if (absDy < 2) return `M ${x1},${y1} L ${x2},${y2}`;
+    const dirY = dy > 0 ? 1 : -1, r = Math.min(CORNER_R, absDy / 2), midX = x1 + EXIT_GAP;
+    if (x2 > midX + r * 2) return `M ${x1},${y1} L ${midX},${y1} Q ${midX+r},${y1} ${midX+r},${y1+dirY*r} L ${midX+r},${y2-dirY*r} Q ${midX+r},${y2} ${midX+2*r},${y2} L ${x2},${y2}`;
+    const safeX = Math.max(x1 + EXIT_GAP, x2 - EXIT_GAP), cpX = safeX + r;
+    return `M ${x1},${y1} L ${safeX},${y1} Q ${cpX},${y1} ${cpX},${y1+dirY*r} L ${cpX},${y2-dirY*r} Q ${cpX},${y2} ${cpX+r},${y2} L ${x2},${y2}`;
   }
-
-  // Track which workgroup pairs already have job-level curves
   const coveredWgPairs = new Set<string>();
-
   if (rightW > 0) {
-    // ── Layer 1: Job-level curves (from job_dependencies) ──
     jobDepEdges.forEach(({ fromJobId, toJobId }) => {
-      const fromPos = jobBarPos.get(fromJobId);
-      const toPos = jobBarPos.get(toJobId);
+      const fromPos = jobBarPos.get(fromJobId), toPos = jobBarPos.get(toJobId);
       if (!fromPos || !toPos) return;
-
-      const x1 = (fromPos.right / 100) * rightW;
-      const y1 = fromPos.yCenterPx;
-      const x2 = (toPos.left / 100) * rightW;
-      const y2 = toPos.yCenterPx;
-
-      const fromWg = jobToWgId.get(fromJobId);
-      const toWg = jobToWgId.get(toJobId);
-      const isCrossWg = fromWg !== toWg;
-
+      const x1 = (fromPos.right / 100) * rightW, y1 = fromPos.yCenterPx, x2 = (toPos.left / 100) * rightW, y2 = toPos.yCenterPx;
+      const fromWg = jobToWgId.get(fromJobId), toWg = jobToWgId.get(toJobId), isCrossWg = fromWg !== toWg;
       if (isCrossWg && fromWg && toWg) coveredWgPairs.add(`${fromWg}->${toWg}`);
-
-      depCurves.push({
-        key: `job:${fromJobId}->${toJobId}`,
-        path: buildConnectorPath(x1, y1, x2, y2),
-        x1, y1, x2, y2, isCrossWg, level: 'job',
-      });
+      depCurves.push({ key: `job:${fromJobId}->${toJobId}`, path: buildConnectorPath(x1, y1, x2, y2), x1, y1, x2, y2, isCrossWg, level: 'job' });
     });
-
-    // ── Layer 2: Workgroup-level curves (from wg.dependsOnIds) ──
-    d.worksites.forEach(ws => ws.workgroups.forEach(wg => {
-      if (wg.dependsOnIds.length === 0) return;
-      wg.dependsOnIds.forEach(predId => {
+    g.worksites.forEach(ws => ws.workgroups.forEach(wg => {
+      (wg.dependsOnIds || []).forEach(predId => {
         if (coveredWgPairs.has(`${predId}->${wg.id}`)) return;
-
-        const fromPos = wgBarPos.get(predId);
-        const toPos = wgBarPos.get(wg.id);
+        const fromPos = wgBarPos.get(predId), toPos = wgBarPos.get(wg.id);
         if (!fromPos || !toPos) return;
-
-        const x1 = (fromPos.right / 100) * rightW;
-        const y1 = fromPos.yCenterPx;
-        const x2 = (toPos.left / 100) * rightW;
-        const y2 = toPos.yCenterPx;
-
-        depCurves.push({
-          key: `wg:${predId}->${wg.id}`,
-          path: buildConnectorPath(x1, y1, x2, y2),
-          x1, y1, x2, y2, isCrossWg: true, level: 'workgroup',
-        });
+        const x1 = (fromPos.right / 100) * rightW, y1 = fromPos.yCenterPx, x2 = (toPos.left / 100) * rightW, y2 = toPos.yCenterPx;
+        depCurves.push({ key: `wg:${predId}->${wg.id}`, path: buildConnectorPath(x1, y1, x2, y2), x1, y1, x2, y2, isCrossWg: true, level: 'workgroup' });
       });
     }));
+    pendingDeps.forEach(dep => {
+      const fromPos = jobBarPos.get(dep.from_id), toPos = jobBarPos.get(dep.to_id);
+      if (!fromPos || !toPos) return;
+      const x1 = (fromPos.right / 100) * rightW, y1 = fromPos.yCenterPx, x2 = (toPos.left / 100) * rightW, y2 = toPos.yCenterPx;
+      depCurves.push({ key: `pending:${dep.from_id}->${dep.to_id}`, path: buildConnectorPath(x1, y1, x2, y2), x1, y1, x2, y2, isCrossWg: true, level: 'pending' });
+    });
   }
+
+  // ── Dep drag handlers ──
+  const startDepDrag = (e: React.MouseEvent, jobId: string) => {
+    e.stopPropagation();
+    const rect = svgRef.current?.getBoundingClientRect();
+    const pos = jobBarPos.get(jobId);
+    if (!rect || !pos) return;
+    setDepDrag({ fromJobId: jobId, fromX: (pos.right / 100) * rightW, fromY: pos.yCenterPx, curX: e.clientX - rect.left, curY: e.clientY - rect.top });
+  };
+
+  useEffect(() => {
+    if (!depDrag) return;
+    const onMove = (e: MouseEvent) => { const rect = svgRef.current?.getBoundingClientRect(); if (rect) setDepDrag(prev => prev ? { ...prev, curX: e.clientX - rect.left, curY: e.clientY - rect.top } : null); };
+    const onUp = async (e: MouseEvent) => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (rect && depDrag) {
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        let closestJob: string | null = null, closestDist = 30;
+        jobBarPos.forEach((pos, jobId) => { if (jobId === depDrag.fromJobId) return; const bx = (pos.left / 100) * rightW; const dist = Math.sqrt((mx - bx) ** 2 + (my - pos.yCenterPx) ** 2); if (dist < closestDist) { closestDist = dist; closestJob = jobId; } });
+        if (closestJob) {
+          const newDep: ChangeEdge = { action: 'add', from_id: depDrag.fromJobId, to_id: closestJob, level: 'job' };
+          const updated = [...pendingDeps, newDep];
+          setPendingDeps(updated);
+          const result = await previewChanges(updated);
+          setPreview(result);
+        }
+      }
+      setDepDrag(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [depDrag, jobBarPos, rightW, pendingDeps, previewChanges]);
+
+  const handleApply = async () => { const ok = await applyChanges(pendingDeps); if (ok) { setPendingDeps([]); setPreview(null); } };
+  const handleDiscard = () => { setPendingDeps([]); setPreview(null); };
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
 
-      {/* ── Header row (month columns) ── */}
+      {/* Pending deps banner */}
+      {pendingDeps.length > 0 && (
+        <div style={{ flexShrink: 0, padding: "8px 16px", background: "linear-gradient(135deg,rgba(124,58,237,0.06),rgba(124,58,237,0.03))", borderBottom: "1.5px solid rgba(124,58,237,0.25)", display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#7C3AED" }}>{pendingDeps.length} new dep{pendingDeps.length > 1 ? 's' : ''} pending</span>
+          {preview && <span style={{ fontSize: 11, color: preview.valid ? "#2E7D5F" : "#D44A2E", fontWeight: 600 }}>{preview.valid ? `✓ Valid — ${preview.impact.duration_delta >= 0 ? '+' : ''}${preview.impact.duration_delta}d impact` : `✗ ${preview.errors[0] || 'Invalid'}`}{preview.impact.critical_path_changed ? ' · Critical path changed' : ''}</span>}
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            <button onClick={handleDiscard} style={{ padding: "4px 12px", borderRadius: 6, border: "1.5px solid rgba(212,74,46,0.3)", background: "transparent", color: "#D44A2E", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'Outfit',sans-serif" }}>Discard</button>
+            {preview?.valid && <button onClick={handleApply} style={{ padding: "4px 12px", borderRadius: 6, border: "none", background: "linear-gradient(135deg,#7C3AED,#9F7AEA)", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'Outfit',sans-serif" }}>Apply Changes</button>}
+          </div>
+        </div>
+      )}
+
+      {/* Month header */}
       <div style={{ flexShrink: 0, display: "flex", borderBottom: "2px solid #C4B5A2" }}>
         <div style={{ width: LEFT_W, flexShrink: 0, padding: "10px 14px", background: "#1A1814", display: "flex", alignItems: "center" }}>
           <span style={{ fontSize: 10, fontWeight: 800, color: "#9C8E7C", textTransform: "uppercase", letterSpacing: "0.12em" }}>Site / Trade / Job</span>
         </div>
         <div style={{ flex: 1, display: "flex", position: "relative", background: "#FAF9F6" }}>
-          {months.map((m, i) => (
-            <div key={i} style={{
-              position: "absolute", left: `${m.left}%`, width: `${m.width}%`,
-              padding: "10px 0", textAlign: "center",
-              borderLeft: i > 0 ? "1px solid #ECEAE6" : "none",
-            }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6B5F4F", letterSpacing: "0.04em" }}>{m.label}</span>
-            </div>
-          ))}
-          {/* Today marker */}
-          <div style={{ position: "absolute", top: 0, bottom: -2, width: 2, zIndex: 20, left: `${todayPct}%`, background: "#D44A2E" }}>
-            <div style={{ position: "absolute", top: -1, left: "50%", transform: "translateX(-50%)", fontSize: 8, fontWeight: 900, color: "#fff", background: "#D44A2E", padding: "2px 8px", borderRadius: "0 0 5px 5px", letterSpacing: "0.06em" }}>TODAY</div>
-          </div>
+          {months.map((m, i) => (<div key={i} style={{ position: "absolute", left: `${m.left}%`, width: `${m.width}%`, padding: "10px 0", textAlign: "center", borderLeft: i > 0 ? "1px solid #ECEAE6" : "none" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#6B5F4F", letterSpacing: "0.04em" }}>{m.label}</span></div>))}
+          <div style={{ position: "absolute", top: 0, bottom: -2, width: 2, zIndex: 20, left: `${todayPct}%`, background: "#D44A2E" }}><div style={{ position: "absolute", top: -1, left: "50%", transform: "translateX(-50%)", fontSize: 8, fontWeight: 900, color: "#fff", background: "#D44A2E", padding: "2px 8px", borderRadius: "0 0 5px 5px", letterSpacing: "0.06em" }}>TODAY</div></div>
         </div>
       </div>
 
-      {/* ── Scrollable body ── */}
+      {/* Scrollable body */}
       <div style={{ flex: 1, overflowY: "auto" }}>
         <div ref={contentRef} style={{ paddingBottom: 35, background: "#fff", minHeight: "100%", position: "relative" }}>
 
-        {/* ── Dependency connection overlay ── */}
-        {rightW > 0 && depCurves.length > 0 && (
-          <svg style={{
-            position: "absolute", top: 0, left: LEFT_W, width: `calc(100% - ${LEFT_W}px)`,
-            height: Math.max(totalContentH, 1), pointerEvents: "none", zIndex: 15, overflow: "visible",
-          }}>
-            <defs>
-              <marker id="dep-arrow-cross" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
-                <path d="M1,1 L6,3.5 L1,6" fill="none" stroke="#C07B1A" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-              </marker>
-              <marker id="dep-arrow-intra" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
-                <path d="M1,1 L6,3.5 L1,6" fill="none" stroke="#9C8E7C" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-              </marker>
-            </defs>
-            {depCurves.map(dep => {
-              const color = dep.isCrossWg ? "#C07B1A" : "#9C8E7C";
-              const markerId = dep.isCrossWg ? "dep-arrow-cross" : "dep-arrow-intra";
-              return (
-                <path
-                  key={dep.key}
-                  d={dep.path}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  markerEnd={`url(#${markerId})`}
-                  opacity={0.7}
-                />
-              );
-            })}
-          </svg>
-        )}
-        {d.worksites.map((ws, wi) => {
-          const sc = SC[wi % SC.length];
-          return (
-            <div key={ws.name} style={{ animation: `fu .32s ${wi * 70}ms both` }}>
-
-              {/* ── Site header row ── */}
-              <div style={{ display: "flex", alignItems: "stretch", height: SITE_ROW_H, borderBottom: "1.5px solid #C4B5A2", position: "sticky", top: 0, zIndex: 10 }}>
-                <div style={{ width: LEFT_W, flexShrink: 0, padding: "0 14px", display: "flex", alignItems: "center", gap: 8, background: sc.gradient }}>
-                  <MapPinI size={12} color="#fff" />
-                  <span style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>{ws.shortName}</span>
-                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", fontWeight: 600 }}>{ws.workgroups.length} trades · {ws.workgroups.flatMap(wg => wg.jobs).length} jobs</span>
-                </div>
-                <div style={{ flex: 1, background: sc.bg, position: "relative" }}>
-                  {months.map((m, i) => i > 0 ? <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${m.left}%`, borderLeft: "1px solid rgba(0,0,0,0.04)" }} /> : null)}
-                </div>
-              </div>
-
-              {/* ── Workgroup rows ── */}
-              {ws.workgroups.map((wg, wgi) => {
-                const ti = TI[wg.trade] || DEFAULT_TRADE;
-                const TradeIcon = ti.Icon;
-                const sm = SM[wg.status] || SM.draft;
-                const isE = exp.has(wg.id);
-                const isH = hovered === wg.id;
-                const dn = wg.jobs.filter((j: UIJob) => j.status === "complete").length;
-                const pc = wg.jobs.length > 0 ? (dn / wg.jobs.length) * 100 : 0;
-                const s = wg.startDate ? d2p(wg.startDate) : 0;
-                const e = wg.endDate ? d2p(wg.endDate) : s + 4;
-                const w = Math.max(e - s, 2);
-                const wgSpent = wg.jobs.filter((j: UIJob) => j.paid).reduce((a: number, j: UIJob) => a + (j.invoiceAmount || 0), 0);
-
-                return (
-                  <div key={wg.id} style={{ animation: `si .3s ${wi * 70 + wgi * 45 + 60}ms both` }}>
-
-                    {/* Workgroup row */}
-                    <div
-                      onClick={() => toggleExp(wg.id)}
-                      onMouseEnter={() => setHovered(wg.id)}
-                      onMouseLeave={() => setHovered(null)}
-                      style={{
-                        display: "flex", alignItems: "center", height: ROW_H,
-                        borderBottom: `1px solid ${isE ? "#C4B5A2" : "#ECEAE6"}`,
-                        cursor: "pointer",
-                        background: isH ? "#FAF9F6" : isE ? "#FAFAF8" : "transparent",
-                        transition: "background .15s",
-                      }}>
-
-                      {/* Left panel */}
-                      <div style={{ width: LEFT_W, flexShrink: 0, padding: "0 14px", display: "flex", alignItems: "center", gap: 8 }}>
-                        {/* Expand/collapse indicator */}
-                        <span style={{ fontSize: 10, color: "#9C8E7C", width: 12, textAlign: "center", flexShrink: 0, transition: "transform .2s", transform: isE ? "rotate(90deg)" : "none" }}>▶</span>
-                        <div style={{ width: 3, height: 26, borderRadius: 2, background: sm.p.grad, flexShrink: 0 }} />
-                        <div style={{ width: 28, height: 28, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", background: ti.bg, flexShrink: 0 }}>
-                          <TradeIcon size={14} color={ti.c} />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: "#1A1814", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wg.title}</span>
-                            <Badge status={wg.status} />
-                          </div>
-                          <p style={{ fontSize: 10, color: "#9C8E7C", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {wg.contractor} · {dn}/{wg.jobs.length} jobs · {fmt(wg.budget)}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Right: Gantt bars */}
-                      <div style={{ flex: 1, position: "relative", height: "100%", display: "flex", alignItems: "center" }}>
-                        {/* Month grid lines */}
-                        {months.map((m, i) => i > 0 ? <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${m.left}%`, borderLeft: "1px solid rgba(0,0,0,0.04)" }} /> : null)}
-
-                        {/* Workgroup bar */}
-                        <div
-                          onMouseEnter={(ev) => setTooltip({ x: ev.clientX, y: ev.clientY, content: `${wg.title}: ${fmt(wgSpent)} paid of ${fmt(wg.budget)} · ${dn}/${wg.jobs.length} jobs done` })}
-                          onMouseLeave={() => setTooltip(null)}
-                          style={{
-                            position: "absolute", height: 24, borderRadius: 8, overflow: "hidden",
-                            left: `${s}%`, width: `${w}%`,
-                            background: wg.dependsOnIds.length > 0 && wg.status !== "complete" && wg.status !== "in_progress" ? "transparent" : "rgba(0,0,0,0.04)",
-                            border: wg.dependsOnIds.length > 0 && wg.status !== "complete" && wg.status !== "in_progress" ? `2px dashed ${P.pending.fg}` : `1.5px solid ${sm.p.ring}`,
-                            transition: "box-shadow .2s",
-                            boxShadow: isH ? `0 2px 10px ${sm.p.fg}20` : "none",
-                            zIndex: 6,
-                          }}>
-                          <div style={{
-                            height: "100%", width: `${pc}%`,
-                            background: sm.p.grad, borderRadius: 7,
-                            transition: "width .7s ease",
-                          }} />
-                          {wg.status === "in_progress" && (
-                            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg,transparent 25%,rgba(255,255,255,0.25) 50%,transparent 75%)", backgroundSize: "200% 100%", animation: "sh 2s infinite" }} />
-                          )}
-                        </div>
-
-                        {/* Completion label */}
-                        <span style={{ position: "absolute", fontSize: 11, fontWeight: 800, zIndex: 10, left: `${Math.min(s + w + 0.8, 96)}%`, color: sm.p.fg }}>
-                          {dn}/{wg.jobs.length}
-                        </span>
-
-                        {/* Milestone diamond at end date */}
-                        {wg.status === "complete" && (
-                          <div style={{
-                            position: "absolute", zIndex: 10, left: `${e}%`, top: "50%",
-                            transform: "translate(-50%, -50%) rotate(45deg)",
-                            width: 10, height: 10, background: sm.p.fg,
-                            border: "2px solid #fff",
-                            boxShadow: `0 0 0 1px ${sm.p.fg}`,
-                          }} />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* ── Expanded job rows ── */}
-                    {isE && wg.jobs.map((job: UIJob, ji: number) => {
-                      const jSm = SM[job.status] || SM.ns;
-                      const isDone = job.status === "complete";
-                      const isAct = job.status === "in_progress";
-                      const wStart = wg.startDate ? new Date(wg.startDate).getTime() : tS;
-                      const off = wg.jobs.slice(0, job.sequence - 1).reduce((a: number, j: UIJob) => a + j.durationDays, 0);
-                      const jS = new Date(wStart + off * 864e5);
-                      const jE = new Date(jS.getTime() + job.durationDays * 864e5);
-                      const jL = d2p(jS);
-                      const jR = d2p(jE);
-                      const jW = Math.max(jR - jL, 1);
-                      const isJobH = hovered === job.id;
-
-                      return (
-                        <div key={job.id}
-                          onMouseEnter={() => setHovered(job.id)}
-                          onMouseLeave={() => setHovered(null)}
-                          style={{
-                            display: "flex", alignItems: "center", height: JOB_ROW_H,
-                            borderBottom: "1px solid #F0EDE8",
-                            animation: `fu .25s ${ji * 30}ms both`,
-                            background: isJobH ? "#FAF9F6" : "transparent",
-                            transition: "background .12s",
-                          }}>
-
-                          {/* Left panel (indented) */}
-                          <div style={{ width: LEFT_W, flexShrink: 0, paddingLeft: 56, paddingRight: 12, display: "flex", alignItems: "center", gap: 7 }}>
-                            {isDone ? <div style={{ width: 16, height: 16, borderRadius: 8, background: P.done.grad, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><CheckI size={8} color="#fff" sw={3} /></div>
-                              : isAct ? <div style={{ width: 16, height: 16, borderRadius: 8, background: P.active.grad, flexShrink: 0, animation: "pg 2s ease-in-out infinite" }} />
-                              : <div style={{ width: 16, height: 16, borderRadius: 8, border: "1.5px solid #C4B5A2", background: "#fff", flexShrink: 0 }} />}
-                            <span style={{
-                              fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                              color: isDone ? "#9C8E7C" : "#3D3529",
-                              fontWeight: isDone ? 500 : 600,
-                              textDecoration: isDone ? "line-through" : "none",
-                            }}>{job.title}</span>
-                            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#9C8E7C", flexShrink: 0, fontWeight: 600 }}>{job.durationDays}d</span>
-                            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#8C7E6A", flexShrink: 0, fontWeight: 700 }}>{fmt(job.budget)}</span>
-                          </div>
-
-                          {/* Right: Job bar */}
-                          <div style={{ flex: 1, position: "relative", height: "100%", display: "flex", alignItems: "center" }}>
-                            {months.map((m, i) => i > 0 ? <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${m.left}%`, borderLeft: "1px solid rgba(0,0,0,0.03)" }} /> : null)}
-                            <div
-                              onMouseEnter={(ev) => setTooltip({
-                                x: ev.clientX, y: ev.clientY,
-                                content: `${job.title}: ${job.durationDays} days · ${fmt(job.budget)}${job.paid ? " · Paid" : job.invoiced ? " · Invoiced" : ""}`,
-                              })}
-                              onMouseLeave={() => setTooltip(null)}
-                              style={{
-                                position: "absolute", height: 16, borderRadius: 6,
-                                left: `${jL}%`, width: `${jW}%`,
-                                background: jSm.p.grad,
-                                opacity: job.status === "not_started" ? 0.18 : 1,
-                                boxShadow: isJobH && job.status !== "not_started" ? `0 2px 8px ${jSm.p.fg}25` : "none",
-                                transition: "box-shadow .15s, opacity .3s",
-                              }}>
-                              {isAct && (
-                                <div style={{ position: "absolute", inset: 0, borderRadius: 6, background: "linear-gradient(90deg,transparent 25%,rgba(255,255,255,0.25) 50%,transparent 75%)", backgroundSize: "200% 100%", animation: "sh 2s infinite" }} />
-                              )}
-                            </div>
-                            {/* Invoice status indicator */}
-                            {(job.paid || job.invoiced) && (
-                              <span style={{
-                                position: "absolute", fontSize: 9, fontWeight: 700,
-                                left: `${Math.min(jL + jW + 0.5, 95)}%`,
-                                color: job.paid ? "#2E7D5F" : "#C07B1A",
-                                zIndex: 8,
-                              }}>
-                                {job.paid ? "Paid" : "Inv'd"}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
+          {/* SVG overlay */}
+          {rightW > 0 && (
+            <svg ref={svgRef} style={{ position: "absolute", top: 0, left: LEFT_W, width: `calc(100% - ${LEFT_W}px)`, height: Math.max(totalContentH, 1), pointerEvents: "none", zIndex: 15, overflow: "visible" }}>
+              <defs>
+                <marker id="dep-arrow-cross" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M1,1 L6,3.5 L1,6" fill="none" stroke="#C07B1A" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></marker>
+                <marker id="dep-arrow-intra" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M1,1 L6,3.5 L1,6" fill="none" stroke="#9C8E7C" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></marker>
+                <marker id="dep-arrow-pending" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M1,1 L7,4 L1,7" fill="none" stroke="#7C3AED" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></marker>
+              </defs>
+              {/* Float bars */}
+              {floatBars.map(fb => {
+                const barLeft = (fb.endPct / 100) * rightW, barWidth = ((fb.floatEndPct - fb.endPct) / 100) * rightW;
+                if (barWidth < 3) return null;
+                return (<g key={`float-${fb.wgId}`}><rect x={barLeft} y={fb.y + ROW_H/2 - 12} width={barWidth} height={24} rx={8} fill="rgba(45,109,181,0.06)" stroke="rgba(45,109,181,0.2)" strokeWidth="1" strokeDasharray="4,3" /><text x={barLeft + barWidth/2} y={fb.y + ROW_H/2 + 3} textAnchor="middle" fontSize="9" fontWeight="700" fill="#2D6DB5" fontFamily="'Outfit',sans-serif" opacity="0.6">{fb.floatDays}d slack</text></g>);
               })}
-            </div>
-          );
-        })}
+              {/* Dep arrows */}
+              {depCurves.map(dep => { const isPending = dep.level === 'pending'; const color = isPending ? "#7C3AED" : dep.isCrossWg ? "#C07B1A" : "#9C8E7C"; const mid = isPending ? "dep-arrow-pending" : dep.isCrossWg ? "dep-arrow-cross" : "dep-arrow-intra"; return (<path key={dep.key} d={dep.path} fill="none" stroke={color} strokeWidth={isPending ? 2 : 1.5} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={isPending ? "6,4" : "none"} markerEnd={`url(#${mid})`} opacity={isPending ? 0.9 : 0.7} />); })}
+              {/* Live drag line */}
+              {depDrag && <line x1={depDrag.fromX} y1={depDrag.fromY} x2={depDrag.curX} y2={depDrag.curY} stroke="#7C3AED" strokeWidth="2" strokeDasharray="6,4" opacity="0.8" pointerEvents="none" />}
+            </svg>
+          )}
 
-        {/* Today line continues through body */}
-        <div style={{ position: "sticky", bottom: 0, height: 0, zIndex: 5, pointerEvents: "none" }}>
-          <div style={{ position: "absolute", bottom: 0, top: -9999, width: 2, left: `calc(${LEFT_W}px + (100% - ${LEFT_W}px) * ${todayPct / 100})`, background: "rgba(212,74,46,0.15)" }} />
-        </div>
+          {/* Rows */}
+          {g.worksites.map((ws, wi) => {
+            const sc = SC[wi % SC.length];
+            return (
+              <div key={ws.id} style={{ animation: `fu .32s ${wi * 70}ms both` }}>
+                {/* Site header */}
+                <div style={{ display: "flex", alignItems: "stretch", height: SITE_ROW_H, borderBottom: "1.5px solid #C4B5A2", position: "sticky", top: 0, zIndex: 10 }}>
+                  <div style={{ width: LEFT_W, flexShrink: 0, padding: "0 14px", display: "flex", alignItems: "center", gap: 8, background: sc.gradient }}>
+                    <MapPinI size={12} color="#fff" />
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>{ws.shortName}</span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", fontWeight: 600 }}>{ws.workgroups.length} trades · {ws.workgroups.flatMap(w => w.jobs).length} jobs</span>
+                  </div>
+                  <div style={{ flex: 1, background: sc.bg, position: "relative" }}>
+                    {months.map((m, i) => i > 0 ? <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${m.left}%`, borderLeft: "1px solid rgba(0,0,0,0.04)" }} /> : null)}
+                  </div>
+                </div>
+                {/* Workgroup rows */}
+                {ws.workgroups.map((wg, wgi) => {
+                  const ti = TI[wg.trade] || DEFAULT_TRADE; const TradeIcon = ti.Icon;
+                  const sm = SM[wg.status] || SM.draft;
+                  const isE = exp.has(wg.id), isH = hovered === wg.id;
+                  const dn = wg.jobs.filter((j: UIGanttJob) => j.status === "complete" || j.status === "paid").length;
+                  const pc = wg.jobs.length > 0 ? (dn / wg.jobs.length) * 100 : 0;
+                  const s = wg.startDate ? d2p(wg.startDate) : 0;
+                  const e = wg.endDate ? d2p(wg.endDate) : s + 4;
+                  const w = Math.max(e - s, 2);
+                  const isCrit = wg.isCritical;
+                  const isBlocked = wg.dependsOnIds.length > 0 && wg.status !== "complete" && wg.status !== "in_progress";
+
+                  return (
+                    <div key={wg.id} style={{ animation: `si .3s ${wi * 70 + wgi * 45 + 60}ms both` }}>
+                      <div onClick={() => toggleExp(wg.id)} onMouseEnter={() => setHovered(wg.id)} onMouseLeave={() => setHovered(null)}
+                        style={{ display: "flex", alignItems: "center", height: ROW_H, borderBottom: `1px solid ${isE ? "#C4B5A2" : "#ECEAE6"}`, cursor: "pointer", background: isH ? "#FAF9F6" : isE ? "#FAFAF8" : "transparent", transition: "background .15s" }}>
+                        <div style={{ width: LEFT_W, flexShrink: 0, padding: "0 14px", display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 10, color: "#9C8E7C", width: 12, textAlign: "center", flexShrink: 0, transition: "transform .2s", transform: isE ? "rotate(90deg)" : "none" }}>▶</span>
+                          <div style={{ width: 3, height: 26, borderRadius: 2, background: sm.p.grad, flexShrink: 0 }} />
+                          <div style={{ width: 28, height: 28, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", background: ti.bg, flexShrink: 0 }}><TradeIcon size={14} color={ti.c} /></div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: "#1A1814", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wg.title}</span>
+                              <Badge status={wg.status} />
+                              {isCrit && <span style={{ fontSize: 7, padding: "1px 5px", borderRadius: 4, fontWeight: 800, letterSpacing: "0.04em", background: "#D44A2E", color: "#fff" }}>CRIT</span>}
+                              {wg.isBottleneck && <span style={{ fontSize: 7, padding: "1px 5px", borderRadius: 4, fontWeight: 800, background: "#7C3AED", color: "#fff" }}>⚠ BTL</span>}
+                            </div>
+                            <p style={{ fontSize: 10, color: "#9C8E7C", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {wg.contractor} · {dn}/{wg.jobs.length} jobs · {fmt(wg.budget)}
+                              {wg.floatDays > 0 && <span style={{ color: "#2D6DB5", fontWeight: 600 }}> · {wg.floatDays}d float</span>}
+                            </p>
+                          </div>
+                        </div>
+                        <div style={{ flex: 1, position: "relative", height: "100%", display: "flex", alignItems: "center" }}>
+                          {months.map((m, i) => i > 0 ? <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${m.left}%`, borderLeft: "1px solid rgba(0,0,0,0.04)" }} /> : null)}
+                          <div onMouseEnter={(ev) => setTooltip({ x: ev.clientX, y: ev.clientY, title: wg.title, sub: `${wg.contractor} · ${wg.startDate ? fmtDate(wg.startDate) : '?'} → ${wg.endDate ? fmtDate(wg.endDate) : '?'}`, budget: fmt(wg.budget), paid: fmt(wg.totalPaid), invoiced: fmt(wg.totalInvoiced), progress: `${Math.round(pc)}% (${dn}/${wg.jobs.length})`, floatInfo: wg.floatDays > 0 ? `${wg.floatDays} days slack` : undefined, critical: isCrit, msg: wg.statusMessage })} onMouseMove={(ev) => setTooltip(prev => prev ? { ...prev, x: ev.clientX, y: ev.clientY } : null)} onMouseLeave={() => setTooltip(null)}
+                            style={{ position: "absolute", height: 24, borderRadius: 8, overflow: "hidden", left: `${s}%`, width: `${w}%`, background: isBlocked ? "transparent" : "rgba(0,0,0,0.04)", border: isBlocked ? `2px dashed ${P.pending.fg}` : `1.5px solid ${sm.p.ring}`, transition: "box-shadow .2s", boxShadow: isCrit && wg.status === "in_progress" ? `0 0 0 2px rgba(212,74,46,0.12)` : isH ? `0 2px 10px ${sm.p.fg}20` : "none", animation: isCrit && wg.status === "in_progress" ? "critPulse 2.5s ease-in-out infinite" : undefined, zIndex: 6 }}>
+                            <div style={{ height: "100%", width: `${pc}%`, background: sm.p.grad, borderRadius: 7, transition: "width .7s ease" }} />
+                            {wg.status === "in_progress" && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg,transparent 25%,rgba(255,255,255,0.25) 50%,transparent 75%)", backgroundSize: "200% 100%", animation: "sh 2s infinite" }} />}
+                          </div>
+                          <span style={{ position: "absolute", fontSize: 11, fontWeight: 800, zIndex: 10, left: `${Math.min(s + w + 0.8, 96)}%`, color: sm.p.fg }}>{dn}/{wg.jobs.length}</span>
+                          {wg.status === "complete" && <div style={{ position: "absolute", zIndex: 10, left: `${e}%`, top: "50%", transform: "translate(-50%, -50%) rotate(45deg)", width: 10, height: 10, background: sm.p.fg, border: "2px solid #fff", boxShadow: `0 0 0 1px ${sm.p.fg}` }} />}
+                        </div>
+                      </div>
+                      {/* Expanded job rows */}
+                      {isE && wg.jobs.map((job: UIGanttJob, ji: number) => {
+                        const jSm = SM[job.status] || SM.not_started;
+                        const isDone = job.status === "complete" || job.status === "paid";
+                        const isAct = job.status === "in_progress";
+                        const jobPos = jobBarPos.get(job.id);
+                        if (!jobPos) return null;
+                        const jL = jobPos.left, jR = jobPos.right, jW = Math.max(jR - jL, 1);
+                        const isJobH = hovered === job.id;
+                        return (
+                          <div key={job.id} onMouseEnter={() => setHovered(job.id)} onMouseLeave={() => setHovered(null)}
+                            style={{ display: "flex", alignItems: "center", height: JOB_ROW_H, borderBottom: "1px solid #F0EDE8", animation: `fu .25s ${ji * 30}ms both`, background: isJobH ? "#FAF9F6" : "transparent", transition: "background .12s" }}>
+                            <div style={{ width: LEFT_W, flexShrink: 0, paddingLeft: 56, paddingRight: 12, display: "flex", alignItems: "center", gap: 7 }}>
+                              {isDone ? <div style={{ width: 16, height: 16, borderRadius: 8, background: P.done.grad, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><CheckI size={8} color="#fff" sw={3} /></div>
+                                : isAct ? <div style={{ width: 16, height: 16, borderRadius: 8, background: P.active.grad, flexShrink: 0, animation: "pg 2s ease-in-out infinite" }} />
+                                : <div style={{ width: 16, height: 16, borderRadius: 8, border: "1.5px solid #C4B5A2", background: "#fff", flexShrink: 0 }} />}
+                              <span style={{ fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: isDone ? "#9C8E7C" : "#3D3529", fontWeight: isDone ? 500 : 600, textDecoration: isDone ? "line-through" : "none" }}>{job.title}</span>
+                              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#9C8E7C", flexShrink: 0, fontWeight: 600 }}>{job.durationDays}d</span>
+                              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#8C7E6A", flexShrink: 0, fontWeight: 700 }}>{fmt(job.budget)}</span>
+                            </div>
+                            <div style={{ flex: 1, position: "relative", height: "100%", display: "flex", alignItems: "center" }}>
+                              {months.map((m, i) => i > 0 ? <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${m.left}%`, borderLeft: "1px solid rgba(0,0,0,0.03)" }} /> : null)}
+                              <div onMouseEnter={(ev) => setTooltip({ x: ev.clientX, y: ev.clientY, title: job.title, sub: `${job.durationDays} days · ${fmt(job.budget)}`, paid: job.paid ? "Paid" : undefined, invoiced: job.invoiced && !job.paid ? "Invoiced" : undefined, floatInfo: job.floatDays > 0 ? `${job.floatDays}d float` : undefined, critical: job.isCritical })} onMouseMove={(ev) => setTooltip(prev => prev ? { ...prev, x: ev.clientX, y: ev.clientY } : null)} onMouseLeave={() => setTooltip(null)}
+                                style={{ position: "absolute", height: 16, borderRadius: 6, left: `${jL}%`, width: `${jW}%`, background: jSm.p.grad, opacity: job.status === "not_started" ? 0.18 : 1, boxShadow: isJobH && job.status !== "not_started" ? `0 2px 8px ${jSm.p.fg}25` : "none", transition: "box-shadow .15s, opacity .3s" }}>
+                                {isAct && <div style={{ position: "absolute", inset: 0, borderRadius: 6, background: "linear-gradient(90deg,transparent 25%,rgba(255,255,255,0.25) 50%,transparent 75%)", backgroundSize: "200% 100%", animation: "sh 2s infinite" }} />}
+                              </div>
+                              {/* Dep drag handle */}
+                              <div className="dep-handle" onMouseDown={(e) => startDepDrag(e, job.id)} style={{ position: "absolute", left: `${jR}%`, top: "50%", transform: "translate(-50%,-50%)", width: 10, height: 10, borderRadius: "50%", background: "#7C3AED", border: "2px solid #fff", boxShadow: "0 1px 4px rgba(0,0,0,0.2)", zIndex: 20, pointerEvents: "auto", cursor: "crosshair" }} />
+                              {(job.paid || job.invoiced) && <span style={{ position: "absolute", fontSize: 9, fontWeight: 700, left: `${Math.min(jL + jW + 0.5, 95)}%`, color: job.paid ? "#2E7D5F" : "#C07B1A", zIndex: 8 }}>{job.paid ? "Paid" : "Inv'd"}</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+          <div style={{ position: "sticky", bottom: 0, height: 0, zIndex: 5, pointerEvents: "none" }}><div style={{ position: "absolute", bottom: 0, top: -9999, width: 2, left: `calc(${LEFT_W}px + (100% - ${LEFT_W}px) * ${todayPct / 100})`, background: "rgba(212,74,46,0.15)" }} /></div>
         </div>
       </div>
-
-      {/* ── Tooltip ── */}
+      {/* Rich tooltip */}
       {tooltip && (
-        <div style={{
-          position: "fixed", left: tooltip.x + 12, top: tooltip.y - 10,
-          padding: "8px 14px", borderRadius: 10,
-          background: "#1A1814", color: "#fff",
-          fontSize: 12, fontWeight: 600,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-          zIndex: 1000, pointerEvents: "none",
-          maxWidth: 320, whiteSpace: "nowrap",
-        }}>
-          {tooltip.content}
+        <div style={{ position: "fixed", left: tooltip.x + 14, top: tooltip.y - 10, padding: "10px 14px", borderRadius: 12, background: "#1A1814", color: "#fff", fontSize: 12, fontWeight: 600, boxShadow: "0 12px 32px rgba(0,0,0,0.3)", zIndex: 1000, pointerEvents: "none", maxWidth: 320, minWidth: 180 }}>
+          <div style={{ fontWeight: 800, marginBottom: 3 }}>{tooltip.title}</div>
+          {tooltip.sub && <div style={{ fontSize: 11, color: "#9C8E7C", marginBottom: 6 }}>{tooltip.sub}</div>}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {tooltip.budget && <div><div style={{ fontSize: 8, fontWeight: 700, color: "#78716c", textTransform: "uppercase", letterSpacing: "0.06em" }}>Budget</div><div style={{ fontSize: 12, fontWeight: 800 }}>{tooltip.budget}</div></div>}
+            {tooltip.paid && <div><div style={{ fontSize: 8, fontWeight: 700, color: "#78716c", textTransform: "uppercase", letterSpacing: "0.06em" }}>Paid</div><div style={{ fontSize: 12, fontWeight: 800, color: "#86EFAC" }}>{tooltip.paid}</div></div>}
+            {tooltip.invoiced && <div><div style={{ fontSize: 8, fontWeight: 700, color: "#78716c", textTransform: "uppercase", letterSpacing: "0.06em" }}>Invoiced</div><div style={{ fontSize: 12, fontWeight: 800, color: "#FDE68A" }}>{tooltip.invoiced}</div></div>}
+            {tooltip.progress && <div><div style={{ fontSize: 8, fontWeight: 700, color: "#78716c", textTransform: "uppercase", letterSpacing: "0.06em" }}>Progress</div><div style={{ fontSize: 12, fontWeight: 800 }}>{tooltip.progress}</div></div>}
+          </div>
+          {tooltip.floatInfo && <div style={{ marginTop: 5, fontSize: 10, fontWeight: 700, color: "#93C5FD" }}>◇ {tooltip.floatInfo}</div>}
+          {tooltip.critical && <div style={{ marginTop: 3, fontSize: 10, fontWeight: 800, color: "#FCA5A5" }}>⚠ Critical Path</div>}
+          {tooltip.msg && <div style={{ marginTop: 3, fontSize: 10, color: "#a8a29e", fontStyle: "italic" }}>{tooltip.msg}</div>}
         </div>
       )}
     </div>
   );
 }
+
 
 /* ═══════════════════ CARD VIEW (unchanged from original) ═══════════════════ */
 function CardView({ onOpenDrawer, d }: { onOpenDrawer: (wg: UIWorkgroup) => void; d: UIDashboard }) {
@@ -1090,6 +934,125 @@ function ProjectOutlook({ d }: { d: UIDashboard }) {
   );
 }
 
+/* ═══════════════════ GANTT OUTLOOK — Timeline sidebar (uses real analysis data) ═══════════════════ */
+function GanttOutlook({ g }: { g: UIGanttData }) {
+  const a = g.analysis || {} as any;
+  const criticalPath = a.criticalPath || [];
+  const aiInsights = a.aiInsights || [];
+  const bottlenecks = a.bottlenecks || [];
+  const resourceConflicts = (a.resourceConflicts || []).filter((rc: any) => rc.overlap_days > 0);
+  return (
+    <div style={{ width: 390, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto", background: "#fff", borderLeft: "1.5px solid #ECEAE6" }}>
+      <div style={{ padding: "10px 16px", borderBottom: "1px solid #ECEAE6" }}><h2 style={{ fontSize: 15, fontWeight: 900, color: "#1A1814", letterSpacing: "-0.01em" }}>Project Outlook</h2></div>
+
+      {/* Critical Path */}
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid #ECEAE6" }}>
+        <h3 style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.12em", color: "#1A1814", display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+          <div style={{ width: 22, height: 22, borderRadius: 7, background: P.crit.grad, display: "flex", alignItems: "center", justifyContent: "center" }}><AlertCI size={12} color="#fff" /></div>Critical Path
+          <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: "#D44A2E" }}>{criticalPath.length} nodes</span>
+        </h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {criticalPath.map(wgId => {
+            const wg = g.allWg.find(w => w.id === wgId);
+            if (!wg) return null;
+            const isActive = wg.status === "in_progress";
+            const c = isActive ? P.crit : wg.status === "complete" ? P.done : P.pending;
+            return (
+              <div key={wgId} style={{ display: "flex", gap: 8, padding: "8px 10px", borderRadius: 10, background: c.bg, border: `1px solid ${c.ring}` }}>
+                <ClockI size={14} color={c.fg} />
+                <div style={{ flex: 1 }}><p style={{ fontSize: 12, fontWeight: 700, color: c.fg }}>{wg.title}</p><p style={{ fontSize: 11, color: isActive ? "#D44A2E" : "#8C7E6A", marginTop: 1 }}>{wg.statusMessage}</p></div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* AI Insights */}
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid #ECEAE6" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+          <h3 style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.12em", color: "#1A1814", display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 22, height: 22, borderRadius: 7, background: P.done.grad, display: "flex", alignItems: "center", justifyContent: "center" }}><SparkI size={12} color="#fff" /></div>AI Insights
+          </h3>
+          <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, fontWeight: 700, background: P.done.grad, padding: "3px 10px", borderRadius: 12, color: "#fff" }}><RadioI size={10} color="#fff" />Live</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {aiInsights.map((ins, i) => {
+            const c = ins.severity === "success" ? P.done : ins.severity === "warning" ? P.pending : ins.severity === "critical" ? P.crit : P.active;
+            const IconC = ins.severity === "success" ? CheckI : ins.severity === "warning" ? AlertTI : ins.severity === "critical" ? AlertCI : SparkI;
+            return (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "7px 8px", borderRadius: 10 }}>
+                <div style={{ width: 22, height: 22, borderRadius: 7, background: c.grad, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><IconC size={12} color="#fff" /></div>
+                <p style={{ fontSize: 13, color: "#5C5043", lineHeight: 1.4 }}>{ins.text}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Bottlenecks */}
+      {bottlenecks.length > 0 && (
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #ECEAE6" }}>
+          <h3 style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.12em", color: "#1A1814", marginBottom: 10 }}>Bottlenecks</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {bottlenecks.map(bn => (
+              <div key={bn.workgroup_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 10, background: "#F5F0FF", border: "1px solid #E0D4F0" }}>
+                <span style={{ fontSize: 9, fontWeight: 800, background: "#7C3AED", color: "#fff", padding: "2px 6px", borderRadius: 4 }}>⚠ BTL</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#3D3058" }}>{bn.title}</span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "#7B5EA7", fontWeight: 700 }}>{bn.downstream_count} downstream</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Needs Attention */}
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid #ECEAE6" }}>
+        <h3 style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.12em", color: "#1A1814", marginBottom: 10 }}>Needs Attention</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {[
+            { v: g.wgPendingN, l: "Pending", p: P.pending },
+            { v: g.criticalWgCount, l: "Critical", p: P.crit },
+            { v: g.bottleneckWgCount, l: "Bottleneck", p: { bg: "#F5F0FF", fg: "#7C3AED", ring: "#E0D4F0", grad: "linear-gradient(135deg,#7C3AED,#9F7AEA)" } },
+            { v: g.wgActiveN, l: "Active", p: P.active },
+          ].map(it => (
+            <div key={it.l} style={{ padding: "10px 8px", borderRadius: 12, textAlign: "center" as const, background: it.p.bg, border: `1px solid ${it.p.ring}` }}>
+              <p style={{ fontSize: 22, fontWeight: 900, color: it.p.fg }}>{it.v}</p>
+              <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: it.p.fg, opacity: 0.6 }}>{it.l}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Completion Forecast */}
+      {a.forecast && (
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #ECEAE6" }}>
+          <h3 style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.12em", color: "#1A1814", marginBottom: 10 }}>Completion Forecast</h3>
+          <div style={{ padding: "10px 12px", borderRadius: 12, background: a.forecast.correction_factor > 1.05 ? P.crit.bg : P.done.bg, border: `1px solid ${a.forecast.correction_factor > 1.05 ? P.crit.ring : P.done.ring}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ fontSize: 11, color: "#8C7E6A" }}>Pace</span><span style={{ fontSize: 12, fontWeight: 700, color: a.forecast.correction_factor > 1.05 ? P.crit.fg : P.done.fg }}>{a.forecast.correction_factor}x vs estimates</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ fontSize: 11, color: "#8C7E6A" }}>Confidence</span><span style={{ fontSize: 12, fontWeight: 700, color: "#5C5043", textTransform: "capitalize" }}>{a.forecast.confidence}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, color: "#8C7E6A" }}>Trend</span><span style={{ fontSize: 12, fontWeight: 700, color: a.forecast.trend === "improving" ? P.done.fg : a.forecast.trend === "worsening" ? P.crit.fg : "#8C7E6A", textTransform: "capitalize" }}>{a.forecast.trend}</span></div>
+            {a.forecast.message && <p style={{ fontSize: 11, color: "#8C7E6A", marginTop: 6, fontStyle: "italic" }}>{a.forecast.message}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Site Presence */}
+      <div style={{ padding: "12px 16px" }}>
+        <h3 style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.12em", color: "#1A1814", display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}><UsersI size={14} color="#8C7E6A" />Site Presence</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {g.worksites.map((ws, wi) => { const ac = ws.workgroups.filter(wg => wg.status === "in_progress").length; const sc2 = SC[wi % SC.length]; return (
+            <div key={ws.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 12, border: `1px solid ${sc2.ring}`, background: sc2.bg }}>
+              <div style={{ width: 10, height: 10, borderRadius: 5, background: ac > 0 ? P.done.grad : "#C4B5A2" }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: sc2.text, flex: 1 }}>{ws.shortName}</span>
+              <span style={{ fontSize: 12, color: sc2.accent, fontWeight: 600 }}>{ac > 0 ? `${ac} active` : "Idle"}</span>
+            </div>
+          ); })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════ NEW: BUDGET & EXPENSES VIEW ═══════════════════ */
 function BudgetExpensesView({ d }: { d: UIDashboard }) {
   const [filter, setFilter] = useState("all");
@@ -1218,8 +1181,20 @@ export function ProjectDetailPage() {
   useEffect(() => { requestAnimationFrame(() => setReady(true)); }, []);
 
   const { projectId } = useParams<{ projectId: string }>();
+
+  // Dashboard data — feeds Overview tab, Budget tab, and header
   const { data, loading, error, refresh } = useDashboard(projectId);
   const d = data ? transformDashboardData(data) : null;
+
+  // Gantt data — feeds Timeline tab only (superset of dashboard data + all DAG analysis)
+  const {
+    data: ganttData,
+    loading: ganttLoading,
+    error: ganttError,
+    refresh: ganttRefresh,
+    previewChanges,
+    applyChanges,
+  } = useGanttData(projectId);
 
   if (loading || !d) { return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontFamily: "'Outfit',sans-serif" }}>
@@ -1275,7 +1250,7 @@ export function ProjectDetailPage() {
                 <span style={{ fontSize: 13, fontWeight: 900, color: "#fff" }}>{s.v}</span><span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: "rgba(255,255,255,0.65)" }}>{s.l}</span>
               </div>
             )}
-            <button onClick={refresh} title="Refresh" style={{ padding: 7, borderRadius: 8, border: "1px solid #ECEAE6", background: "#FAFAF8", cursor: "pointer" }}>
+            <button onClick={() => { refresh(); ganttRefresh(); }} title="Refresh" style={{ padding: 7, borderRadius: 8, border: "1px solid #ECEAE6", background: "#FAFAF8", cursor: "pointer" }}>
               <BellI size={14} color="#9C8E7C" />
             </button>
           </div>
@@ -1294,19 +1269,43 @@ export function ProjectDetailPage() {
             <div key={x.l} style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 14, height: 6, borderRadius: 3, background: x.g }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>{x.l}</span></div>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 8, height: 8, transform: "rotate(45deg)", background: P.done.fg, border: "1px solid #fff", boxShadow: `0 0 0 0.5px ${P.done.fg}` }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>Milestone</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 L8,5 L8,5 L12,5 L12,5 L19,5" stroke="#C07B1A" strokeWidth="1.5" fill="none" opacity="0.7" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#C07B1A" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Cross-trade dep</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 L8,5 L8,5 L12,5 L12,5 L19,5" stroke="#9C8E7C" strokeWidth="1.5" fill="none" opacity="0.7" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#9C8E7C" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Job dep</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 L19,5" stroke="#C07B1A" strokeWidth="1.5" fill="none" opacity="0.7" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#C07B1A" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Cross-trade dep</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 L19,5" stroke="#9C8E7C" strokeWidth="1.5" fill="none" opacity="0.7" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#9C8E7C" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Job dep</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 14, height: 6, borderRadius: 3, background: "rgba(45,109,181,0.15)", border: "1px dashed rgba(45,109,181,0.4)" }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>Float</span></div>
         </div>}
       </div>
 
       {/* ── Tab Content ── */}
       <div style={{ flex: 1, display: "flex", minHeight: 0, background: "#F7F6F3" }}>
         {activeTab === "overview" && <CardView onOpenDrawer={setDrawerWg} d={d} />}
-        {activeTab === "timeline" && <GanttView d={d} />}
+
+        {/* Timeline: uses GanttData from /api/dependencies/gantt endpoint */}
+        {activeTab === "timeline" && (
+          ganttData
+            ? <GanttView g={ganttData} previewChanges={previewChanges} applyChanges={applyChanges} />
+            : ganttLoading
+              ? <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ width: 32, height: 32, border: "3px solid #ECEAE6", borderTopColor: "#3D6B5E", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 12px" }} />
+                    <p style={{ fontSize: 13, color: "#8C7E6A" }}>Loading timeline analysis...</p>
+                  </div>
+                </div>
+              : ganttError
+                ? <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ textAlign: "center", padding: 24 }}>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: "#D44A2E", marginBottom: 8 }}>Failed to load timeline</p>
+                      <p style={{ fontSize: 12, color: "#8C7E6A", marginBottom: 12 }}>{ganttError}</p>
+                      <button onClick={ganttRefresh} style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: P.crit.grad, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Retry</button>
+                    </div>
+                  </div>
+                : null
+        )}
+
         {activeTab === "budget" && <BudgetExpensesView d={d} />}
 
-        {/* Project Outlook sidebar (shown on overview and timeline tabs) */}
-        {(activeTab === "overview" || activeTab === "timeline") && <ProjectOutlook d={d} />}
+        {/* Sidebar: Overview uses original ProjectOutlook, Timeline uses GanttOutlook with real analysis */}
+        {activeTab === "overview" && <ProjectOutlook d={d} />}
+        {activeTab === "timeline" && ganttData && <GanttOutlook g={ganttData} />}
       </div>
 
       {/* Drawer */}
