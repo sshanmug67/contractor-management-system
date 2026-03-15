@@ -334,7 +334,9 @@ function GanttView({ d }: { d: UIDashboard }) {
   });
   const totalContentH = yOff;
 
-  // ── Build curved Bézier paths for each dependency edge ──
+  // ── Build stepped connector paths for each dependency edge ──
+  // Pattern: exit right → drop down → enter right (with rounded corners)
+  // This is the standard Gantt dependency line style (MS Project, Monday, etc.)
   interface DepCurve {
     key: string;
     path: string;
@@ -344,6 +346,51 @@ function GanttView({ d }: { d: UIDashboard }) {
     level: 'job' | 'workgroup';
   }
   const depCurves: DepCurve[] = [];
+
+  const CORNER_R = 6; // corner radius for the stepped connectors
+  const EXIT_GAP = 10; // horizontal gap before dropping down
+
+  /** Build a stepped connector path from (x1,y1) to (x2,y2) */
+  function buildConnectorPath(x1: number, y1: number, x2: number, y2: number): string {
+    const dy = y2 - y1;
+    const absDy = Math.abs(dy);
+
+    // Same row — simple horizontal line
+    if (absDy < 2) {
+      return `M ${x1},${y1} L ${x2},${y2}`;
+    }
+
+    const dirY = dy > 0 ? 1 : -1; // 1 = downward, -1 = upward
+    const r = Math.min(CORNER_R, absDy / 2); // clamp radius if rows are very close
+
+    // Determine the X position for the vertical segment
+    // Place it just after the predecessor bar end
+    const midX = x1 + EXIT_GAP;
+
+    // If target is to the right of our vertical segment (normal case)
+    if (x2 > midX + r * 2) {
+      return [
+        `M ${x1},${y1}`,                                          // start
+        `L ${midX},${y1}`,                                        // exit right
+        `Q ${midX + r},${y1} ${midX + r},${y1 + dirY * r}`,      // corner: turn into vertical
+        `L ${midX + r},${y2 - dirY * r}`,                         // vertical drop
+        `Q ${midX + r},${y2} ${midX + r + r},${y2}`,              // corner: turn into horizontal
+        `L ${x2},${y2}`,                                          // enter target
+      ].join(' ');
+    }
+
+    // Target is close to or left of the vertical — use a wider midpoint
+    const safeX = Math.max(x1 + EXIT_GAP, x2 - EXIT_GAP);
+    const cpX = safeX + r;
+    return [
+      `M ${x1},${y1}`,
+      `L ${safeX},${y1}`,
+      `Q ${cpX},${y1} ${cpX},${y1 + dirY * r}`,
+      `L ${cpX},${y2 - dirY * r}`,
+      `Q ${cpX},${y2} ${cpX + r},${y2}`,
+      `L ${x2},${y2}`,
+    ].join(' ');
+  }
 
   // Track which workgroup pairs already have job-level curves
   const coveredWgPairs = new Set<string>();
@@ -360,39 +407,23 @@ function GanttView({ d }: { d: UIDashboard }) {
       const x2 = (toPos.left / 100) * rightW;
       const y2 = toPos.yCenterPx;
 
-      const dy = y2 - y1;
-      const dx = x2 - x1;
       const fromWg = jobToWgId.get(fromJobId);
       const toWg = jobToWgId.get(toJobId);
       const isCrossWg = fromWg !== toWg;
 
-      // Mark this workgroup pair as covered by job-level deps
       if (isCrossWg && fromWg && toWg) coveredWgPairs.add(`${fromWg}->${toWg}`);
 
-      let path: string;
-      if (Math.abs(dy) < 4) {
-        const cpOff = Math.max(Math.abs(dx) * 0.35, 18);
-        path = `M ${x1},${y1} C ${x1 + cpOff},${y1} ${x2 - cpOff},${y2} ${x2},${y2}`;
-      } else if (dx > 0) {
-        const exitLen = Math.max(Math.min(dx * 0.3, 60), 16);
-        const entryLen = Math.max(Math.min(dx * 0.3, 60), 16);
-        path = `M ${x1},${y1} C ${x1 + exitLen},${y1} ${x2 - entryLen},${y2} ${x2},${y2}`;
-      } else {
-        const loopOut = 30;
-        const midY = (y1 + y2) / 2;
-        const bump = Math.sign(dy || 1) * Math.max(Math.abs(dy) * 0.4, 24);
-        path = `M ${x1},${y1} C ${x1 + loopOut},${y1} ${x1 + loopOut},${midY + bump} ${(x1 + x2) / 2},${midY + bump} S ${x2 - loopOut},${y2} ${x2},${y2}`;
-      }
-
-      depCurves.push({ key: `job:${fromJobId}->${toJobId}`, path, x1, y1, x2, y2, isCrossWg, level: 'job' });
+      depCurves.push({
+        key: `job:${fromJobId}->${toJobId}`,
+        path: buildConnectorPath(x1, y1, x2, y2),
+        x1, y1, x2, y2, isCrossWg, level: 'job',
+      });
     });
 
     // ── Layer 2: Workgroup-level curves (from wg.dependsOnIds) ──
-    // Only render if no job-level curves already cover this pair
     d.worksites.forEach(ws => ws.workgroups.forEach(wg => {
       if (wg.dependsOnIds.length === 0) return;
       wg.dependsOnIds.forEach(predId => {
-        // Skip if job-level deps already cover this workgroup pair
         if (coveredWgPairs.has(`${predId}->${wg.id}`)) return;
 
         const fromPos = wgBarPos.get(predId);
@@ -404,25 +435,11 @@ function GanttView({ d }: { d: UIDashboard }) {
         const x2 = (toPos.left / 100) * rightW;
         const y2 = toPos.yCenterPx;
 
-        const dy = y2 - y1;
-        const dx = x2 - x1;
-
-        let path: string;
-        if (Math.abs(dy) < 4) {
-          const cpOff = Math.max(Math.abs(dx) * 0.35, 18);
-          path = `M ${x1},${y1} C ${x1 + cpOff},${y1} ${x2 - cpOff},${y2} ${x2},${y2}`;
-        } else if (dx > 0) {
-          const exitLen = Math.max(Math.min(dx * 0.3, 60), 16);
-          const entryLen = Math.max(Math.min(dx * 0.3, 60), 16);
-          path = `M ${x1},${y1} C ${x1 + exitLen},${y1} ${x2 - entryLen},${y2} ${x2},${y2}`;
-        } else {
-          const loopOut = 30;
-          const midY = (y1 + y2) / 2;
-          const bump = Math.sign(dy || 1) * Math.max(Math.abs(dy) * 0.4, 24);
-          path = `M ${x1},${y1} C ${x1 + loopOut},${y1} ${x1 + loopOut},${midY + bump} ${(x1 + x2) / 2},${midY + bump} S ${x2 - loopOut},${y2} ${x2},${y2}`;
-        }
-
-        depCurves.push({ key: `wg:${predId}->${wg.id}`, path, x1, y1, x2, y2, isCrossWg: true, level: 'workgroup' });
+        depCurves.push({
+          key: `wg:${predId}->${wg.id}`,
+          path: buildConnectorPath(x1, y1, x2, y2),
+          x1, y1, x2, y2, isCrossWg: true, level: 'workgroup',
+        });
       });
     }));
   }
@@ -456,48 +473,35 @@ function GanttView({ d }: { d: UIDashboard }) {
       <div style={{ flex: 1, overflowY: "auto" }}>
         <div ref={contentRef} style={{ paddingBottom: 35, background: "#fff", minHeight: "100%", position: "relative" }}>
 
-        {/* ── Curved dependency connections overlay ── */}
+        {/* ── Dependency connection overlay ── */}
         {rightW > 0 && depCurves.length > 0 && (
           <svg style={{
             position: "absolute", top: 0, left: LEFT_W, width: `calc(100% - ${LEFT_W}px)`,
             height: Math.max(totalContentH, 1), pointerEvents: "none", zIndex: 15, overflow: "visible",
           }}>
             <defs>
-              {/* Arrowhead for cross-workgroup (amber) */}
-              <marker id="dep-arrow-cross" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-                <path d="M1,1 L7,4 L1,7" fill="none" stroke="#C07B1A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <marker id="dep-arrow-cross" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M1,1 L6,3.5 L1,6" fill="none" stroke="#C07B1A" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </marker>
-              {/* Arrowhead for intra-workgroup (muted slate) */}
-              <marker id="dep-arrow-intra" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-                <path d="M1,1 L7,4 L1,7" fill="none" stroke="#9C8E7C" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <marker id="dep-arrow-intra" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M1,1 L6,3.5 L1,6" fill="none" stroke="#9C8E7C" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </marker>
             </defs>
             {depCurves.map(dep => {
               const color = dep.isCrossWg ? "#C07B1A" : "#9C8E7C";
-              const glowColor = dep.isCrossWg ? "rgba(192,123,26,0.1)" : "rgba(156,142,124,0.08)";
               const markerId = dep.isCrossWg ? "dep-arrow-cross" : "dep-arrow-intra";
               return (
-                <g key={dep.key}>
-                  {/* Subtle glow path underneath */}
-                  <path
-                    d={dep.path}
-                    fill="none"
-                    stroke={glowColor}
-                    strokeWidth="6"
-                    strokeLinecap="round"
-                  />
-                  {/* Main curved dependency line */}
-                  <path
-                    d={dep.path}
-                    fill="none"
-                    stroke={color}
-                    strokeWidth="1.5"
-                    strokeDasharray={dep.isCrossWg ? "6 4" : "4 3"}
-                    strokeLinecap="round"
-                    markerEnd={`url(#${markerId})`}
-                    style={{ transition: "d 0.4s ease" }}
-                  />
-                </g>
+                <path
+                  key={dep.key}
+                  d={dep.path}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  markerEnd={`url(#${markerId})`}
+                  opacity={0.7}
+                />
               );
             })}
           </svg>
@@ -1290,8 +1294,8 @@ export function ProjectDetailPage() {
             <div key={x.l} style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 14, height: 6, borderRadius: 3, background: x.g }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>{x.l}</span></div>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 8, height: 8, transform: "rotate(45deg)", background: P.done.fg, border: "1px solid #fff", boxShadow: `0 0 0 0.5px ${P.done.fg}` }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>Milestone</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 C6,5 14,5 19,5" stroke="#C07B1A" strokeWidth="1.5" strokeDasharray="3 2" fill="none" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#C07B1A" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Cross-trade dep</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 C6,5 14,5 19,5" stroke="#9C8E7C" strokeWidth="1.5" strokeDasharray="3 2" fill="none" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#9C8E7C" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Job dep</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 L8,5 L8,5 L12,5 L12,5 L19,5" stroke="#C07B1A" strokeWidth="1.5" fill="none" opacity="0.7" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#C07B1A" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Cross-trade dep</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 L8,5 L8,5 L12,5 L12,5 L19,5" stroke="#9C8E7C" strokeWidth="1.5" fill="none" opacity="0.7" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#9C8E7C" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Job dep</span></div>
         </div>}
       </div>
 

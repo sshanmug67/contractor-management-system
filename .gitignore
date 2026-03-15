@@ -40,3 +40,6 @@ frontend/coverage/
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Celery 
+backend/celerybeat-schedule.*

@@ -78,3 +78,34 @@ class IDashboardRepository(ABC):
         will add org_id scoping.
         """
         ...
+
+    @abstractmethod
+    async def get_project_graph(self, project_id: str) -> dict:
+        """
+        Return the complete dependency graph for a project.
+
+        Fetches workgroups, jobs, workgroup dependencies, and job
+        dependencies in minimal queries. Returns a dict that maps
+        directly to the ProjectGraph Pydantic model.
+
+        Used by:
+          - DependencyService (all 9 analytical methods)
+          - GanttData assembly (frontend timeline view)
+          - dependency_changes router (preview/apply endpoints)
+          - scenario_analysis router
+          - progress_worker (on job completion)
+          - deadline_monitor_worker (periodic analysis)
+
+        Returns:
+        {
+            "project_id": str,
+            "workgroups": [ { id, title, trade, worksite_id, status,
+                              start_date, end_date, budget,
+                              est_duration_days, contractor_id } ],
+            "jobs": [ { id, title, workgroup_id, sequence, status,
+                        est_duration_days, budget } ],
+            "wg_edges": [ { id, from_id, to_id, level } ],
+            "job_edges": [ { id, from_id, to_id, level } ],
+        }
+        """
+        ...

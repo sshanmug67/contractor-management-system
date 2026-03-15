@@ -7,6 +7,9 @@ Assembles the nested structure: Project → Worksites → Workgroups → Jobs.
 Also provides portfolio-level queries for the landing page:
   get_portfolio_projects, get_pending_invoices,
   get_pending_workgroups, get_recent_activity
+
+And the dependency graph query for the Dependency Analyzer:
+  get_project_graph
 """
 
 from app.db.providers.supabase.base_repository import SupabaseBaseRepository
@@ -392,6 +395,170 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
 
     def _empty_stats(self):
         return {"worksite_count": 0, "workgroup_count": 0, "wg_active": 0, "wg_pending": 0, "job_count": 0, "jobs_done": 0, "jobs_active": 0}
+
+    # ══════════════════════════════════════════════════════
+    # DEPENDENCY GRAPH QUERY
+    # ══════════════════════════════════════════════════════
+
+    async def get_project_graph(self, project_id: str) -> dict:
+        """
+        Return the complete dependency graph for a project.
+
+        Makes 5 queries:
+          1. Worksites for this project (to get worksite IDs)
+          2. Workgroups across all worksites
+          3. Jobs across all workgroups
+          4. Workgroup dependencies
+          5. Job dependencies
+
+        Returns a dict that maps directly to ProjectGraph(**result).
+        """
+
+        # ── 1. Get worksites for this project ────────────────
+        worksites_result = (
+            self.client.table("worksites")
+            .select("id")
+            .eq("project_id", project_id)
+            .execute()
+        )
+        worksite_ids = [ws["id"] for ws in (worksites_result.data or [])]
+
+        if not worksite_ids:
+            return {
+                "project_id": project_id,
+                "workgroups": [],
+                "jobs": [],
+                "wg_edges": [],
+                "job_edges": [],
+            }
+
+        # ── 2. Get workgroups across all worksites ───────────
+        wg_result = (
+            self.client.table("workgroups")
+            .select(
+                "id, title, trade, worksite_id, status, "
+                "start_date, end_date, budget, contractor_id"
+            )
+            .in_("worksite_id", worksite_ids)
+            .execute()
+        )
+        all_workgroups = wg_result.data or []
+        workgroup_ids = [wg["id"] for wg in all_workgroups]
+
+        if not workgroup_ids:
+            return {
+                "project_id": project_id,
+                "workgroups": [],
+                "jobs": [],
+                "wg_edges": [],
+                "job_edges": [],
+            }
+
+        # ── 3. Get jobs across all workgroups ────────────────
+        jobs_result = (
+            self.client.table("jobs")
+            .select(
+                "id, title, workgroup_id, sequence, status, "
+                "est_duration_days, budget"
+            )
+            .in_("workgroup_id", workgroup_ids)
+            .order("sequence")
+            .execute()
+        )
+        all_jobs = jobs_result.data or []
+        job_ids = [j["id"] for j in all_jobs]
+
+        # ── 4. Get workgroup dependencies ────────────────────
+        wg_deps_result = (
+            self.client.table("workgroup_dependencies")
+            .select("id, workgroup_id, depends_on_workgroup_id")
+            .in_("workgroup_id", workgroup_ids)
+            .execute()
+        ) if workgroup_ids else type("R", (), {"data": []})()
+        all_wg_deps = wg_deps_result.data or []
+
+        # ── 5. Get job dependencies ──────────────────────────
+        job_deps_result = (
+            self.client.table("job_dependencies")
+            .select("id, job_id, depends_on_job_id")
+            .in_("job_id", job_ids)
+            .execute()
+        ) if job_ids else type("R", (), {"data": []})()
+        all_job_deps = job_deps_result.data or []
+
+        # ── Assemble ProjectGraph dict ───────────────────────
+
+        # Index jobs by workgroup for duration calculation
+        jobs_by_wg: dict[str, list[dict]] = {}
+        for j in all_jobs:
+            wg_id = j["workgroup_id"]
+            if wg_id not in jobs_by_wg:
+                jobs_by_wg[wg_id] = []
+            jobs_by_wg[wg_id].append(j)
+
+        workgroups = []
+        for wg in all_workgroups:
+            # est_duration_days = sum of job durations for this workgroup
+            wg_jobs = jobs_by_wg.get(wg["id"], [])
+            est_duration = sum(j.get("est_duration_days", 0) for j in wg_jobs)
+
+            workgroups.append({
+                "id": wg["id"],
+                "title": wg["title"],
+                "trade": wg.get("trade", ""),
+                "worksite_id": wg["worksite_id"],
+                "status": wg["status"],
+                "start_date": wg.get("start_date"),
+                "end_date": wg.get("end_date"),
+                "budget": float(wg.get("budget") or 0),
+                "est_duration_days": est_duration,
+                "contractor_id": wg.get("contractor_id"),
+            })
+
+        jobs = [
+            {
+                "id": j["id"],
+                "title": j["title"],
+                "workgroup_id": j["workgroup_id"],
+                "sequence": j.get("sequence", 1),
+                "status": j["status"],
+                "est_duration_days": j.get("est_duration_days", 0),
+                "budget": float(j.get("budget") or 0),
+            }
+            for j in all_jobs
+        ]
+
+        # Edges: from_id = predecessor (must finish first),
+        #        to_id = dependent (is blocked)
+        # In workgroup_dependencies: depends_on_workgroup_id is the predecessor
+        wg_edges = [
+            {
+                "id": d["id"],
+                "from_id": d["depends_on_workgroup_id"],  # predecessor
+                "to_id": d["workgroup_id"],                # dependent
+                "level": "workgroup",
+            }
+            for d in all_wg_deps
+        ]
+
+        # In job_dependencies: depends_on_job_id is the predecessor
+        job_edges = [
+            {
+                "id": d["id"],
+                "from_id": d["depends_on_job_id"],  # predecessor
+                "to_id": d["job_id"],                # dependent
+                "level": "job",
+            }
+            for d in all_job_deps
+        ]
+
+        return {
+            "project_id": project_id,
+            "workgroups": workgroups,
+            "jobs": jobs,
+            "wg_edges": wg_edges,
+            "job_edges": job_edges,
+        }
 
     # ══════════════════════════════════════════════════════
     # PORTFOLIO QUERIES (for Owner Dashboard landing page)
