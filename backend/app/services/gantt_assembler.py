@@ -22,7 +22,7 @@ Usage:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from app.models.dependency import (
@@ -140,11 +140,13 @@ def assemble_gantt_data(
 
             # Enrich jobs
             enriched_jobs = []
+            total_job_days = 0
             for job in wg.get("jobs", []):
                 job_id = job["id"]
                 j_sched = job_schedule.get(job_id)
                 j_float = job_floats.get(job_id)
                 j_is_crit = job_id in job_critical_set
+                total_job_days += job.get("est_duration_days", 0) or 0
 
                 enriched_job = {
                     **job,
@@ -157,9 +159,23 @@ def assemble_gantt_data(
                 }
                 enriched_jobs.append(enriched_job)
 
+            # ── Compute end_date from start_date + sum(job durations) ──
+            # Start date is user-defined (contractor availability, permits).
+            # End date is derived from actual job scope within the workgroup.
+            # Falls back to DB end_date if start_date is missing or no jobs.
+            computed_end_date = wg.get("end_date")
+            wg_start = wg.get("start_date")
+            if wg_start and total_job_days > 0:
+                try:
+                    start_dt = date.fromisoformat(str(wg_start))
+                    computed_end_date = str(start_dt + timedelta(days=total_job_days))
+                except (ValueError, TypeError):
+                    pass  # Keep DB end_date as fallback
+
             enriched_wg = {
                 **wg,
                 "jobs": enriched_jobs,
+                "end_date": computed_end_date,  # ★ Computed from jobs, not raw DB value
                 # Analysis annotations
                 "earliest_start": sched.earliest_start if sched else None,
                 "earliest_finish": sched.earliest_finish if sched else None,

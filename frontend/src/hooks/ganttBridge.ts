@@ -185,6 +185,8 @@ function transformJob(job: GanttJob): UIGanttJob {
 }
 
 function transformWorkgroup(wg: GanttWorkgroup): UIGanttWorkgroup {
+  const jobs = wg.jobs.map(transformJob);
+
   return {
     id: wg.id,
     worksiteId: wg.worksite_id,
@@ -194,13 +196,13 @@ function transformWorkgroup(wg: GanttWorkgroup): UIGanttWorkgroup {
     contractor: wg.contractor_name || 'Unassigned',
     budget: wg.budget,
     startDate: wg.start_date,
-    endDate: wg.end_date,
+    endDate: wg.end_date,  // ★ Backend computes this from start_date + sum(job durations)
     status: wg.status,
     progressPct: wg.progress_pct,
     dependsOnIds: wg.depends_on_ids || [],
     totalPaid: wg.paid ?? 0,
     totalInvoiced: wg.invoiced ?? 0,
-    jobs: wg.jobs.map(transformJob),
+    jobs,
     earliestStart: wg.earliest_start ?? 0,
     earliestFinish: wg.earliest_finish ?? 0,
     latestStart: wg.latest_start ?? 0,
