@@ -120,10 +120,25 @@ def assemble_gantt_data(
         except Exception:
             downstream_counts[wg.id] = 0
 
+    # ── Build worksite lookup for sensitivity ─────────────
+    worksite_lookup = {}
+    worksites = dashboard_data.get("worksites", [])
+    for ws in worksites:
+        ws_id = ws.get("id", "")
+        ws_name = ws.get("name", "")
+        for wg in ws.get("workgroups", []):
+            worksite_lookup[wg["id"]] = (ws_id, ws_name)
+
+    # ── Sensitivity analysis ──────────────────────────────
+    # ★ FIX: was defined as standalone function, never called
+    sensitivity = service.sensitivity_analysis(
+        test_delay=3,
+        worksite_lookup=worksite_lookup,
+    )
+
     # ── Enrich worksites → workgroups → jobs ──────────────
 
     project_data = dashboard_data.get("project") or {}
-    worksites = dashboard_data.get("worksites", [])
 
     enriched_worksites = []
     for ws in worksites:
@@ -139,18 +154,14 @@ def assemble_gantt_data(
             is_crit = wg_id in wg_critical_set
 
             # Enrich jobs with computed start/end dates
-            # Jobs run sequentially within a WG based on their sequence number.
-            # Each job's start = WG start + sum(durations of all preceding jobs).
             enriched_jobs = []
             total_job_days = 0
 
-            # Sort jobs by sequence to ensure correct date accumulation
             sorted_jobs = sorted(
                 wg.get("jobs", []),
                 key=lambda j: j.get("sequence", 0) or 0,
             )
 
-            # Parse WG start date once
             wg_start_str = wg.get("start_date")
             wg_start_dt = None
             if wg_start_str:
@@ -168,7 +179,6 @@ def assemble_gantt_data(
                 duration = job.get("est_duration_days", 0) or 0
                 total_job_days += duration
 
-                # Compute this job's start and end dates
                 job_start_date = None
                 job_end_date = None
                 if wg_start_dt and duration > 0:
@@ -179,10 +189,8 @@ def assemble_gantt_data(
 
                 enriched_job = {
                     **job,
-                    # Computed dates
                     "start_date": job_start_date,
                     "end_date": job_end_date,
-                    # Analysis annotations
                     "earliest_start": j_sched.earliest_start if j_sched else None,
                     "earliest_finish": j_sched.earliest_finish if j_sched else None,
                     "float_days": j_float if j_float is not None else None,
@@ -191,10 +199,6 @@ def assemble_gantt_data(
                 }
                 enriched_jobs.append(enriched_job)
 
-            # ── Compute end_date from start_date + sum(job durations) ──
-            # Start date is user-defined (contractor availability, permits).
-            # End date is derived from actual job scope within the workgroup.
-            # Falls back to DB end_date if start_date is missing or no jobs.
             computed_end_date = wg.get("end_date")
             wg_start = wg.get("start_date")
             if wg_start and total_job_days > 0:
@@ -202,13 +206,12 @@ def assemble_gantt_data(
                     start_dt = date.fromisoformat(str(wg_start))
                     computed_end_date = str(start_dt + timedelta(days=total_job_days))
                 except (ValueError, TypeError):
-                    pass  # Keep DB end_date as fallback
+                    pass
 
             enriched_wg = {
                 **wg,
                 "jobs": enriched_jobs,
-                "end_date": computed_end_date,  # ★ Computed from jobs, not raw DB value
-                # Analysis annotations
+                "end_date": computed_end_date,
                 "earliest_start": sched.earliest_start if sched else None,
                 "earliest_finish": sched.earliest_finish if sched else None,
                 "latest_start": sched.latest_start if sched else None,
@@ -231,29 +234,23 @@ def assemble_gantt_data(
     # ── Assemble the full GanttData dict ──────────────────
 
     gantt_data = {
-        # Project header with analysis annotations
         "project": {
             **project_data,
             "project_duration_days": snapshot.project_duration_days,
-            "projected_end_date": None,  # TODO: compute from start_date + duration
+            "projected_end_date": None,
             "adjusted_end_date": forecast.adjusted_end_date if forecast.correction_factor > 1.05 else None,
         },
 
-        # Enriched worksites with nested workgroups and jobs
         "worksites": enriched_worksites,
 
-        # Critical path (for sidebar)
         "critical_path": snapshot.critical_path,
         "critical_path_details": [
             entry.model_dump() for entry in snapshot.critical_path_details
         ],
 
-        # AI insights (for sidebar)
         "ai_insight_bullets": snapshot.ai_insight_bullets,
 
-        # Sidebar analysis panels
         "analysis": {
-            # Health snapshot summary
             "newly_unblocked_workgroups": [
                 e.model_dump() for e in snapshot.newly_unblocked_workgroups
             ],
@@ -267,7 +264,6 @@ def assemble_gantt_data(
                 e.model_dump() for e in snapshot.approaching_deadlines
             ],
 
-            # Criticality ranking
             "criticality_rankings": [
                 e.model_dump() for e in ranking.rankings
             ],
@@ -276,30 +272,24 @@ def assemble_gantt_data(
             ],
             "criticality_summary": ranking.summary,
 
-            # Parallel work
             "parallel_work": parallel.model_dump(),
 
-            # Bottlenecks
             "bottlenecks": [b.model_dump() for b in bottlenecks],
 
-            # Resource conflicts
             "resource_conflicts": [c.model_dump() for c in conflicts],
 
-            # Cash flow
             "cashflow": cashflow.model_dump(),
 
-            # Completion forecast
             "forecast": forecast.model_dump(),
+
+            # ★ FIX: sensitivity now actually included in the response
+            "sensitivity": sensitivity.model_dump(),
         },
 
-        # Budget summary (pass through from dashboard)
         "budget_summary": dashboard_data.get("budget_summary", {}),
 
-        # Stats (pass through from dashboard)
         "stats": dashboard_data.get("stats", {}),
 
-        # Embedded ProjectGraph for frontend to send back to
-        # preview/scenario endpoints without another DB fetch
         "graph": graph.model_dump(),
     }
 

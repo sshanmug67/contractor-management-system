@@ -65,6 +65,8 @@ from app.models.dependency import (
     UnblockedResult, NotificationAction,
     # Periodic trigger
     DelayImpactResult, DelayedEntity, CascadingDelay,
+    # Sensitivity Analysis
+    SensitivityEntry, SensitivityLevel, SiteSensitivity, SensitivityReport,
 )
 
 
@@ -1231,6 +1233,230 @@ class DependencyService:
             trend=trend,
             message=message,
         )
+
+
+    # ══════════════════════════════════════════════════════════
+    # METHOD 10: SENSITIVITY ANALYSIS
+    # ══════════════════════════════════════════════════════════
+ 
+    def sensitivity_analysis(
+        self,
+        test_delay: int = 3,
+        worksite_lookup: dict[str, tuple[str, str]] | None = None,
+    ) -> SensitivityReport:
+        """
+        Test every non-complete workgroup with a standard delay and
+        rank by project impact to find the most schedule-sensitive WGs.
+ 
+        This answers: "Which workgroups, if delayed even slightly,
+        will push the entire project end date?"
+ 
+        Algorithm:
+          For each non-complete WG:
+            1. Simulate +test_delay days using DAG engine
+            2. Measure project_delay = new_duration - original_duration
+            3. Compute sensitivity_coefficient = project_delay / test_delay
+            4. Record break_even_days = float (max delay with zero project impact)
+            5. Count downstream affected WGs and their total budget
+          Sort by coefficient descending → most dangerous first.
+          Group by worksite for per-site risk view.
+ 
+        Args:
+            test_delay: standard delay to simulate per WG (default 3 days).
+                        Small enough to detect sensitivity, large enough
+                        to exceed most float buffers.
+            worksite_lookup: optional {wg_id: (worksite_id, worksite_name)}
+                            for per-site grouping. If None, site grouping
+                            is skipped.
+ 
+        Returns:
+            SensitivityReport with per-WG entries, per-site aggregation,
+            top risks, and human-readable summary.
+ 
+        Performance:
+            N × forward_pass where N = non-complete workgroups.
+            For a project with 20 WGs: ~20 × O(V+E) ≈ <10ms total.
+            Safe for daily periodic computation + event-driven refresh.
+        """
+        from datetime import datetime
+ 
+        original_duration = self._wg_dag.project_duration()
+        original_floats = self._wg_dag.float_map()
+        critical_path_set = set(self._wg_dag.critical_path())
+        bottleneck_ids = set()
+        try:
+            bottlenecks = self.detect_bottlenecks()
+            bottleneck_ids = {b.entity_id for b in bottlenecks}
+        except Exception:
+            pass
+ 
+        entries: list[SensitivityEntry] = []
+ 
+        for wg in self._graph.workgroups:
+            if _is_complete(wg.status):
+                continue
+ 
+            wg_float = original_floats.get(wg.id, 0)
+ 
+            # ── Simulate delay ──
+            project_delay, node_shifts = self._wg_dag.simulate_delay_impact(
+                {wg.id: test_delay}
+            )
+ 
+            # Sensitivity coefficient: 0.0 = fully absorbed, 1.0 = 1:1 propagation
+            coefficient = project_delay / test_delay if test_delay > 0 else 0.0
+            coefficient = round(min(coefficient, 1.0), 3)
+ 
+            # Break-even: max delay before project is impacted
+            # This equals the float days for this WG
+            break_even = wg_float
+ 
+            # Classify sensitivity level
+            if coefficient >= 0.9:
+                level = SensitivityLevel.CRITICAL
+            elif coefficient >= 0.5:
+                level = SensitivityLevel.HIGH
+            elif coefficient > 0:
+                level = SensitivityLevel.MODERATE
+            else:
+                level = SensitivityLevel.RESILIENT
+ 
+            # Downstream: WGs shifted by this delay (excluding self)
+            affected_ids = [
+                nid for nid, shift in node_shifts.items()
+                if shift > 0 and nid != wg.id
+            ]
+            affected_budget = sum(
+                self._wg_map[aid].budget
+                for aid in affected_ids
+                if aid in self._wg_map
+            )
+ 
+            # Worksite info
+            ws_id, ws_name = "", ""
+            if worksite_lookup and wg.id in worksite_lookup:
+                ws_id, ws_name = worksite_lookup[wg.id]
+ 
+            entries.append(SensitivityEntry(
+                workgroup_id=wg.id,
+                title=wg.title,
+                trade=getattr(wg, "trade", ""),
+                contractor_name=getattr(wg, "contractor_name", ""),
+                worksite_id=ws_id,
+                worksite_name=ws_name,
+                status=wg.status,
+                test_delay_days=test_delay,
+                project_delay_days=project_delay,
+                sensitivity_coefficient=coefficient,
+                sensitivity_level=level,
+                float_days=wg_float,
+                break_even_days=break_even,
+                downstream_count=len(affected_ids),
+                affected_workgroup_ids=affected_ids,
+                affected_budget=float(affected_budget),
+                is_on_critical_path=wg.id in critical_path_set,
+                is_bottleneck=wg.id in bottleneck_ids,
+            ))
+ 
+        # Sort by coefficient descending, then by downstream_count
+        entries.sort(key=lambda e: (-e.sensitivity_coefficient, -e.downstream_count))
+ 
+        # ── Per-site aggregation ──
+        site_map: dict[str, list[SensitivityEntry]] = {}
+        for entry in entries:
+            if entry.worksite_id:
+                site_map.setdefault(entry.worksite_id, []).append(entry)
+ 
+        site_sensitivities: list[SiteSensitivity] = []
+        for ws_id, ws_entries in site_map.items():
+            ws_name = ws_entries[0].worksite_name if ws_entries else ""
+            crit_count = sum(1 for e in ws_entries if e.sensitivity_level == SensitivityLevel.CRITICAL)
+            high_count = sum(1 for e in ws_entries if e.sensitivity_level == SensitivityLevel.HIGH)
+            coefficients = [e.sensitivity_coefficient for e in ws_entries]
+            avg_coeff = sum(coefficients) / len(coefficients) if coefficients else 0
+            max_coeff = max(coefficients) if coefficients else 0
+ 
+            # Site risk score: weighted combination of critical count + avg sensitivity
+            risk_score = round(crit_count * 3 + high_count * 1.5 + avg_coeff * 2, 2)
+ 
+            site_sensitivities.append(SiteSensitivity(
+                worksite_id=ws_id,
+                worksite_name=ws_name,
+                workgroup_count=len(ws_entries),
+                critical_count=crit_count,
+                high_count=high_count,
+                most_sensitive_wg=ws_entries[0] if ws_entries else None,
+                avg_coefficient=round(avg_coeff, 3),
+                max_coefficient=round(max_coeff, 3),
+                site_risk_score=risk_score,
+            ))
+ 
+        site_sensitivities.sort(key=lambda s: -s.site_risk_score)
+ 
+        # ── Summary stats ──
+        critical_count = sum(1 for e in entries if e.sensitivity_level == SensitivityLevel.CRITICAL)
+        high_count = sum(1 for e in entries if e.sensitivity_level == SensitivityLevel.HIGH)
+        moderate_count = sum(1 for e in entries if e.sensitivity_level == SensitivityLevel.MODERATE)
+        resilient_count = sum(1 for e in entries if e.sensitivity_level == SensitivityLevel.RESILIENT)
+        top_risks = entries[:5]
+ 
+        # ── AI bullets ──
+        ai_bullets = []
+        if critical_count > 0:
+            crit_names = [e.title for e in entries if e.sensitivity_level == SensitivityLevel.CRITICAL][:3]
+            ai_bullets.append(
+                f"{critical_count} workgroup(s) have zero tolerance for delay: "
+                f"{', '.join(crit_names)}. Any delay directly extends the project."
+            )
+        if high_count > 0:
+            ai_bullets.append(
+                f"{high_count} workgroup(s) with high sensitivity — "
+                f"delays partially absorbed but still impact the schedule."
+            )
+        if resilient_count > 0:
+            ai_bullets.append(
+                f"{resilient_count} workgroup(s) have sufficient float to absorb "
+                f"a {test_delay}-day delay without project impact."
+            )
+        if top_risks:
+            top = top_risks[0]
+            if top.break_even_days == 0:
+                ai_bullets.append(
+                    f"Most sensitive: {top.title} — zero float, "
+                    f"{top.downstream_count} downstream WGs affected."
+                )
+            else:
+                ai_bullets.append(
+                    f"Most sensitive: {top.title} — "
+                    f"can absorb {top.break_even_days}d before project is impacted."
+                )
+ 
+        # ── Summary string ──
+        total = len(entries)
+        summary = (
+            f"Sensitivity analysis: {total} workgroups tested with +{test_delay}d delay. "
+            f"{critical_count} critical, {high_count} high, "
+            f"{moderate_count} moderate, {resilient_count} resilient."
+        )
+        if top_risks:
+            summary += f" Most vulnerable: {top_risks[0].title}."
+ 
+        return SensitivityReport(
+            project_id=self._graph.project_id if hasattr(self._graph, 'project_id') else "",
+            test_delay_days=test_delay,
+            computed_at=datetime.utcnow().isoformat() + "Z",
+            entries=entries,
+            site_sensitivities=site_sensitivities,
+            total_workgroups_tested=total,
+            critical_count=critical_count,
+            high_count=high_count,
+            moderate_count=moderate_count,
+            resilient_count=resilient_count,
+            top_risks=top_risks,
+            summary=summary,
+            ai_bullets=ai_bullets,
+        )
+
 
     # ══════════════════════════════════════════════════════════
     # REACTIVE TRIGGER: JOB COMPLETION

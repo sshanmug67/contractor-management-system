@@ -12,6 +12,7 @@ Key schema:
   cms:cache:criticality:{project_id}      → criticality ranking JSON
   cms:cache:cashflow:{project_id}         → cash flow projection JSON
   cms:cache:delay_insights:{project_id}   → deadline monitor results JSON
+  cms:cache:sensitivity:{project_id}      → sensitivity analysis JSON
 """
 
 import logging
@@ -26,6 +27,7 @@ HEALTH_SNAPSHOT_TTL = 600       # 10 min
 CRITICALITY_TTL = 600           # 10 min
 CASHFLOW_TTL = 600              # 10 min
 DELAY_INSIGHTS_TTL = 21600      # 6 hours (matches deadline monitor interval)
+SENSITIVITY_TTL = 600           # 10 min
 
 
 # ── GanttData (full enriched timeline response) ───────────
@@ -124,6 +126,24 @@ def set_cached_delay_insights(project_id: str, data: dict) -> bool:
     )
 
 
+# ── Sensitivity Analysis ─────────────────────────────────
+
+def get_cached_sensitivity(project_id: str) -> Optional[dict]:
+    """Read sensitivity analysis report from Redis."""
+    client = get_redis_client()
+    return client.get_json(f"cms:cache:sensitivity:{project_id}")
+
+
+def set_cached_sensitivity(project_id: str, data: dict) -> bool:
+    """Write sensitivity analysis report to Redis."""
+    client = get_redis_client()
+    return client.set_json(
+        f"cms:cache:sensitivity:{project_id}",
+        data,
+        ttl_seconds=SENSITIVITY_TTL,
+    )
+
+
 # ── Invalidation ─────────────────────────────────────────
 
 def invalidate_project_analysis(project_id: str) -> None:
@@ -141,6 +161,7 @@ def invalidate_project_analysis(project_id: str) -> None:
         f"cms:cache:criticality:{project_id}",
         f"cms:cache:cashflow:{project_id}",
         f"cms:cache:delay_insights:{project_id}",
+        f"cms:cache:sensitivity:{project_id}",       # ★ FIX: was missing
     ]
     for key in keys:
         client.delete_key(key)

@@ -625,3 +625,81 @@ class DelayImpactResult(BaseModel):
     project_end_at_risk: bool = False
     estimated_project_delay_days: int = 0
     ai_insight_bullets: list[str] = Field(default_factory=list)
+
+
+class SensitivityLevel(str, Enum):
+    """How sensitive is this workgroup to delay."""
+    CRITICAL = "critical"       # coefficient >= 0.9 — near 1:1 delay propagation
+    HIGH = "high"               # coefficient >= 0.5 — significant propagation
+    MODERATE = "moderate"       # coefficient > 0 — some propagation after float
+    RESILIENT = "resilient"     # coefficient == 0 — fully absorbed by float
+
+
+class SensitivityEntry(BaseModel):
+    """Sensitivity result for a single workgroup."""
+    workgroup_id: str
+    title: str
+    trade: str = ""
+    contractor_name: str = ""
+    worksite_id: str = ""
+    worksite_name: str = ""
+    status: str = ""
+
+    # Core sensitivity metrics
+    test_delay_days: int                    # input delay used for test (e.g. 3)
+    project_delay_days: int                 # resulting project delay
+    sensitivity_coefficient: float          # project_delay / test_delay (0.0–1.0)
+    sensitivity_level: SensitivityLevel
+
+    # Float / buffer info
+    float_days: int = 0                     # available slack before project impact
+    break_even_days: int = 0                # max delay with zero project impact
+
+    # Downstream impact
+    downstream_count: int = 0               # total WGs affected by this delay
+    affected_workgroup_ids: list[str] = Field(default_factory=list)
+    affected_budget: float = 0              # sum of budget across affected WGs
+
+    # Critical path info
+    is_on_critical_path: bool = False
+    is_bottleneck: bool = False
+
+
+class SiteSensitivity(BaseModel):
+    """Aggregated sensitivity for a worksite."""
+    worksite_id: str
+    worksite_name: str
+    workgroup_count: int
+    critical_count: int                     # WGs with sensitivity_level == CRITICAL
+    high_count: int                         # WGs with sensitivity_level == HIGH
+    most_sensitive_wg: Optional[SensitivityEntry] = None
+    avg_coefficient: float = 0.0
+    max_coefficient: float = 0.0
+    site_risk_score: float = 0.0            # weighted score for ranking sites
+
+
+class SensitivityReport(BaseModel):
+    """Complete sensitivity analysis result for a project."""
+    project_id: str
+    test_delay_days: int                    # standard delay used (e.g. 3)
+    computed_at: str                        # ISO timestamp
+
+    # Per-workgroup results (sorted by coefficient descending)
+    entries: list[SensitivityEntry] = Field(default_factory=list)
+
+    # Per-site aggregation
+    site_sensitivities: list[SiteSensitivity] = Field(default_factory=list)
+
+    # Project-level summary
+    total_workgroups_tested: int = 0
+    critical_count: int = 0
+    high_count: int = 0
+    moderate_count: int = 0
+    resilient_count: int = 0
+
+    # Top risks (top 5 most sensitive)
+    top_risks: list[SensitivityEntry] = Field(default_factory=list)
+
+    # Human-readable summary
+    summary: str = ""
+    ai_bullets: list[str] = Field(default_factory=list)

@@ -197,3 +197,33 @@ def _refresh_project(providers, project_id: str, today: date):
     set_cached_cashflow(project_id, cashflow.model_dump())
 
     worker_log(TAG, f"Cached individual analysis results for project {project_id}")
+
+
+def _refresh_project_sensitivity_block(service, graph, project_id, dashboard_data):
+    """
+    Paste this into _refresh_project() after the existing
+    set_cached_cashflow() call.
+    """
+    # ── 6. Sensitivity Analysis ───────────────────────────
+    # Build worksite lookup from dashboard data
+    worksite_lookup = {}
+    if dashboard_data:
+        for ws in dashboard_data.get("worksites", []):
+            ws_id = ws.get("id", "")
+            ws_name = ws.get("name", "")
+            for wg in ws.get("workgroups", []):
+                worksite_lookup[wg["id"]] = (ws_id, ws_name)
+ 
+    sensitivity = service.sensitivity_analysis(
+        test_delay=3,
+        worksite_lookup=worksite_lookup,
+    )
+    set_cached_sensitivity(project_id, sensitivity.model_dump())
+ 
+    worker_log(
+        TAG,
+        f"Cached sensitivity analysis for project {project_id}: "
+        f"{sensitivity.total_workgroups_tested} tested, "
+        f"{sensitivity.critical_count} critical, "
+        f"{sensitivity.high_count} high"
+    )

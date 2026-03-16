@@ -1,12 +1,12 @@
 /**
  * ProjectDetailPage — Orchestrator
  *
- * Manages tab routing, page header, and both data hooks.
- * All rendering delegated to sub-components.
- *
- * Data architecture:
- *   useDashboard(projectId)  → feeds Overview tab, Budget tab, header
- *   useGanttData(projectId)  → feeds Timeline tab only (GanttData from DAG engine)
+ * Changes from previous version:
+ *   ✦ simulatingWgIds: string[] (multi-WG support)
+ *   ✦ simulationMode: "manual" | "sensitivity" state
+ *   ✦ "Sensitivity" button in Gantt tab bar legend area
+ *   ✦ "Simulate" button in Gantt tab bar for quick-launch
+ *   ✦ ScenarioPanel receives initialMode prop
  *
  * File: routes/owner/ProjectDetailPage.tsx
  */
@@ -26,13 +26,21 @@ import { ProjectOutlook } from "./components/ProjectOutlook";
 import { BudgetExpensesView } from "./components/BudgetExpensesView";
 import { WorkgroupDrawer } from "./components/WorkgroupDrawer";
 import { ScenarioPanel } from "./components/ScenarioPanel";
+import ganttService from "@/services/ganttService";
+import type { SensitivityReport } from "@/types/gantt";
+
+type SimulationMode = "manual" | "sensitivity";
 
 export function ProjectDetailPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"overview" | "timeline" | "budget">("overview");
   const [drawerWg, setDrawerWg] = useState<UIWorkgroup | null>(null);
-  const [simulatingWgId, setSimulatingWgId] = useState<string | null>(null);
+
+  // ★ Multi-WG simulation state
+  const [simulatingWgIds, setSimulatingWgIds] = useState<string[]>([]);
+  const [simulationMode, setSimulationMode] = useState<SimulationMode>("manual");
   const [simulationShifts, setSimulationShifts] = useState<{entityId: string; shiftDays: number}[]>([]);
+
   const [ready, setReady] = useState(false);
   useEffect(() => { requestAnimationFrame(() => setReady(true)); }, []);
 
@@ -51,6 +59,40 @@ export function ProjectDetailPage() {
     previewChanges,
     applyChanges,
   } = useGanttData(projectId);
+
+  // ★ Sensitivity data — fetched independently so it's available on Overview tab
+  // Uses the cached GET /sensitivity/{projectId} endpoint (10min Redis TTL)
+  const [sensitivityData, setSensitivityData] = useState<SensitivityReport | null>(null);
+  useEffect(() => {
+    if (!projectId) return;
+    ganttService.getSensitivity(projectId)
+      .then(setSensitivityData)
+      .catch(() => {}); // silently fail — sensitivity is optional
+  }, [projectId]);
+
+  // ★ Helper: open sensitivity panel (no WG pre-selected)
+  const openSensitivity = () => {
+    setSimulatingWgIds(["__sensitivity__"]); // sentinel value — panel opens in sensitivity mode
+    setSimulationMode("sensitivity");
+  };
+
+  // ★ Helper: open simulation panel from right-click
+  const openSimulation = (wgId: string) => {
+    setSimulatingWgIds([wgId]);
+    setSimulationMode("manual");
+  };
+
+  // ★ Helper: close panel
+  const closePanel = () => {
+    setSimulatingWgIds([]);
+    setSimulationShifts([]);
+    setSimulationMode("manual");
+  };
+
+  // Derive whether panel should show
+  const showPanel = simulatingWgIds.length > 0;
+  // For sensitivity mode, don't pass the sentinel to the panel
+  const panelWgIds = simulationMode === "sensitivity" ? [] : simulatingWgIds;
 
   if (loading || !d) { return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontFamily: "'Outfit',sans-serif" }}>
@@ -117,16 +159,48 @@ export function ProjectDetailPage() {
         <TabButton label="Timeline" icon={GanttI} isActive={activeTab === "timeline"} onClick={() => setActiveTab("timeline")} />
         <TabButton label="Budget & Expenses" icon={DollarI} isActive={activeTab === "budget"} onClick={() => setActiveTab("budget")} />
 
-        {/* Gantt legend */}
+        {/* ★ Gantt legend + action buttons */}
         {activeTab === "timeline" && <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12, paddingRight: 8 }}>
+
+          {/* Legend items */}
           {[{ l: "Done", g: P.done.grad }, { l: "Active", g: P.active.grad }, { l: "Queued", g: P.ns.grad }].map((x) =>
             <div key={x.l} style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 14, height: 6, borderRadius: 3, background: x.g }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>{x.l}</span></div>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 14, height: 6, borderRadius: 3, background: P.crit.grad, border: "1px solid #D44A2E" }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>Critical</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 8, height: 8, transform: "rotate(45deg)", background: P.done.fg, border: "1px solid #fff", boxShadow: `0 0 0 0.5px ${P.done.fg}` }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>Milestone</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 L19,5" stroke="#D44A2E" strokeWidth="1.5" strokeDasharray="4,3" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#D44A2E" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Crit dep</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><svg width="20" height="10"><path d="M1,5 L19,5" stroke="#C07B1A" strokeWidth="1.5" /><path d="M16,2 L20,5 L16,8" fill="none" stroke="#C07B1A" strokeWidth="1.2" /></svg><span style={{ fontSize: 10, color: "#8C7E6A" }}>Cross dep</span></div>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 14, height: 6, borderRadius: 3, background: "rgba(45,109,181,0.15)", border: "1px dashed rgba(45,109,181,0.4)" }} /><span style={{ fontSize: 10, color: "#8C7E6A" }}>Float</span></div>
+
+          {/* ★ Separator */}
+          <div style={{ width: 1, height: 20, background: "#ECEAE6" }} />
+
+          {/* ★ Sensitivity Analysis button */}
+          <button onClick={openSensitivity}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(124,58,237,0.08)"; e.currentTarget.style.borderColor = "#7C3AED"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = showPanel && simulationMode === "sensitivity" ? "rgba(124,58,237,0.08)" : "transparent"; e.currentTarget.style.borderColor = showPanel && simulationMode === "sensitivity" ? "#7C3AED" : "rgba(124,58,237,0.3)"; }}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+              border: `1.5px solid ${showPanel && simulationMode === "sensitivity" ? "#7C3AED" : "rgba(124,58,237,0.3)"}`,
+              background: showPanel && simulationMode === "sensitivity" ? "rgba(124,58,237,0.08)" : "transparent",
+              color: "#7C3AED", cursor: "pointer", fontFamily: "'Outfit',sans-serif",
+              transition: "all .15s",
+            }}>
+            🎯 Sensitivity
+          </button>
+
+          {/* ★ Simulate button */}
+          <button onClick={() => { if (ganttData && ganttData.allWg.length > 0) { const firstActive = ganttData.allWg.find(w => w.status === "in_progress") || ganttData.allWg[0]; openSimulation(firstActive.id); } }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(124,58,237,0.08)"; e.currentTarget.style.borderColor = "#7C3AED"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = showPanel && simulationMode === "manual" ? "rgba(124,58,237,0.08)" : "transparent"; e.currentTarget.style.borderColor = showPanel && simulationMode === "manual" ? "#7C3AED" : "rgba(124,58,237,0.3)"; }}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+              border: `1.5px solid ${showPanel && simulationMode === "manual" ? "#7C3AED" : "rgba(124,58,237,0.3)"}`,
+              background: showPanel && simulationMode === "manual" ? "rgba(124,58,237,0.08)" : "transparent",
+              color: "#7C3AED", cursor: "pointer", fontFamily: "'Outfit',sans-serif",
+              transition: "all .15s",
+            }}>
+            ⏱ Simulate
+          </button>
         </div>}
       </div>
 
@@ -136,7 +210,7 @@ export function ProjectDetailPage() {
 
         {activeTab === "timeline" && (
           ganttData
-            ? <GanttView g={ganttData} previewChanges={previewChanges} applyChanges={applyChanges} onSimulate={(wgId) => setSimulatingWgId(wgId)} simulationShifts={simulationShifts} />
+            ? <GanttView g={ganttData} previewChanges={previewChanges} applyChanges={applyChanges} onSimulate={openSimulation} simulationShifts={simulationShifts} />
             : ganttLoading
               ? <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <div style={{ textAlign: "center" }}>
@@ -158,10 +232,16 @@ export function ProjectDetailPage() {
         {activeTab === "budget" && <BudgetExpensesView d={d} />}
 
         {/* Sidebars */}
-        {activeTab === "overview" && <ProjectOutlook d={d} />}
+        {activeTab === "overview" && <ProjectOutlook d={d} sensitivity={sensitivityData} />}
         {activeTab === "timeline" && ganttData && (
-          simulatingWgId
-            ? <ScenarioPanel g={ganttData} workgroupId={simulatingWgId} onClose={() => { setSimulatingWgId(null); setSimulationShifts([]); }} onShiftsChanged={setSimulationShifts} />
+          showPanel
+            ? <ScenarioPanel
+                g={ganttData}
+                workgroupIds={panelWgIds}
+                onClose={closePanel}
+                onShiftsChanged={setSimulationShifts}
+                initialMode={simulationMode}
+              />
             : <GanttOutlook g={ganttData} />
         )}
       </div>

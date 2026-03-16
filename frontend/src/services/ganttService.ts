@@ -19,6 +19,7 @@ import type {
   ApplyResponse,
   ScenarioRequest,
   ScenarioResponse,
+  SensitivityReport,
 } from '@/types/gantt';
 
 const ganttService = {
@@ -61,6 +62,16 @@ const ganttService = {
    */
   async runScenarios(request: ScenarioRequest): Promise<ScenarioResponse> {
     const response = await apiClient.post('/dependencies/scenarios', request);
+    return response.data;
+  },
+
+  async getSensitivity(projectId: string): Promise<SensitivityReport> {
+    const response = await apiClient.get(`/dependencies/sensitivity/${projectId}`);
+    return response.data;
+  },
+  
+  async refreshSensitivity(projectId: string): Promise<SensitivityReport> {
+    const response = await apiClient.post(`/dependencies/sensitivity/${projectId}/refresh`);
     return response.data;
   },
 };

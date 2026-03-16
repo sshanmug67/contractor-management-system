@@ -35,7 +35,9 @@ from app.models.dependency import (
     ScenarioReport,
     HealthSnapshot,
     CriticalityReport,
+    SensitivityReport,
 )
+
 from app.services.dependency_analyzer import DependencyService
 from app.cache.dependency_cache import (
     get_cached_gantt_data,
@@ -47,6 +49,9 @@ from app.cache.dependency_cache import (
     get_cached_cashflow,
     set_cached_cashflow,
     invalidate_project_analysis,
+    get_cached_sensitivity,
+    set_cached_sensitivity,
+    invalidate_sensitivity,
 )
 
 
@@ -390,3 +395,93 @@ async def get_completion_forecast(
     """Completion forecast — actual vs estimated correction."""
     service, graph = await _get_service(project_id, providers)
     return service.completion_forecast().model_dump()
+
+# ══════════════════════════════════════════════════════════════
+# SENSITIVITY ANALYSIS ENDPOINTS (cache-first where applicable)
+# ══════════════════════════════════════════════════════════════
+@router.get("/sensitivity/{project_id}", response_model=SensitivityReport)
+async def get_sensitivity_analysis(
+    project_id: str,
+    test_delay: int = 3,
+    providers=Depends(get_providers),
+):
+    """
+    Get sensitivity analysis for a project — cache-first.
+ 
+    Returns per-workgroup sensitivity rankings showing which WGs
+    are most dangerous to delay. Computed daily by the worker and
+    refreshed on job completions.
+ 
+    Query params:
+        test_delay: delay days to simulate per WG (default 3).
+                    Only default (3) is cached.
+    """
+    # Cache-first for default test_delay
+    if test_delay == 3:
+        cached = get_cached_sensitivity(project_id)
+        if cached:
+            return cached
+ 
+    service, graph = await _get_service(project_id, providers)
+ 
+    # Build worksite lookup for per-site grouping
+    worksite_lookup = _build_worksite_lookup(providers, project_id)
+ 
+    report = service.sensitivity_analysis(
+        test_delay=test_delay,
+        worksite_lookup=worksite_lookup,
+    )
+    result = report.model_dump()
+ 
+    if test_delay == 3:
+        set_cached_sensitivity(project_id, result)
+ 
+    return result
+ 
+ 
+@router.post("/sensitivity/{project_id}/refresh")
+async def refresh_sensitivity_analysis(
+    project_id: str,
+    test_delay: int = 3,
+    providers=Depends(get_providers),
+):
+    """
+    Force-refresh sensitivity analysis for a project.
+ 
+    Called by the frontend "Run Sensitivity Analysis" button.
+    Invalidates cache, recomputes, caches, and returns fresh results.
+    """
+    # Invalidate stale cache
+    invalidate_sensitivity(project_id)
+ 
+    service, graph = await _get_service(project_id, providers)
+    worksite_lookup = await _build_worksite_lookup_async(providers, project_id)
+ 
+    report = service.sensitivity_analysis(
+        test_delay=test_delay,
+        worksite_lookup=worksite_lookup,
+    )
+    result = report.model_dump()
+ 
+    # Cache fresh results
+    set_cached_sensitivity(project_id, result)
+ 
+    return result
+ 
+ 
+async def _build_worksite_lookup_async(providers, project_id: str) -> dict:
+    """
+    Build {wg_id: (worksite_id, worksite_name)} from dashboard data.
+    Used to enrich sensitivity entries with site context.
+    """
+    dashboard_data = await providers.dashboard.get_owner_dashboard(
+        DEV_ORG_ID, project_id=project_id,
+    )
+    lookup = {}
+    if dashboard_data:
+        for ws in dashboard_data.get("worksites", []):
+            ws_id = ws.get("id", "")
+            ws_name = ws.get("name", "")
+            for wg in ws.get("workgroups", []):
+                lookup[wg["id"]] = (ws_id, ws_name)
+    return lookup

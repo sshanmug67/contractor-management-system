@@ -284,3 +284,68 @@ export interface ScenarioResponse {
   scenarios: ScenarioResult[];
   summary?: string;
 }
+
+// ─── Sensitivity Analysis ───
+ 
+export type SensitivityLevel = 'critical' | 'high' | 'moderate' | 'resilient';
+ 
+export interface SensitivityEntry {
+  workgroup_id: string;
+  title: string;
+  trade: string;
+  contractor_name: string;
+  worksite_id: string;
+  worksite_name: string;
+  status: string;
+ 
+  // Core metrics
+  test_delay_days: number;
+  project_delay_days: number;
+  sensitivity_coefficient: number;     // 0.0 to 1.0
+  sensitivity_level: SensitivityLevel;
+ 
+  // Float / buffer
+  float_days: number;
+  break_even_days: number;
+ 
+  // Downstream
+  downstream_count: number;
+  affected_workgroup_ids: string[];
+  affected_budget: number;
+ 
+  // Flags
+  is_on_critical_path: boolean;
+  is_bottleneck: boolean;
+}
+ 
+export interface SiteSensitivity {
+  worksite_id: string;
+  worksite_name: string;
+  workgroup_count: number;
+  critical_count: number;
+  high_count: number;
+  most_sensitive_wg: SensitivityEntry | null;
+  avg_coefficient: number;
+  max_coefficient: number;
+  site_risk_score: number;
+}
+ 
+export interface SensitivityReport {
+  project_id: string;
+  test_delay_days: number;
+  computed_at: string;
+ 
+  entries: SensitivityEntry[];
+  site_sensitivities: SiteSensitivity[];
+ 
+  total_workgroups_tested: number;
+  critical_count: number;
+  high_count: number;
+  moderate_count: number;
+  resilient_count: number;
+ 
+  top_risks: SensitivityEntry[];
+ 
+  summary: string;
+  ai_bullets: string[];
+}
