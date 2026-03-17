@@ -19,7 +19,7 @@ from app.db.interfaces.dashboard_repository import IDashboardRepository
 class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
     """Queries for the owner dashboard."""
 
-    async def get_owner_dashboard(self, org_id: str, project_id: str = None) -> dict:
+    async def get_owner_dashboard(self, org_id: str, project_id: str = None, status: str = None) -> dict:
         """
         Single method that returns the full dashboard payload.
 
@@ -49,10 +49,15 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
             self.client.table("projects")
             .select("*")
             .eq("org_id", org_id)
-            .eq("status", "active")
         )
         if project_id:
+            # Specific project: show regardless of status
+            # (ProjectDetailPage needs planning, active, review, etc.)
             project_query = project_query.eq("id", project_id)
+        elif status:
+            # Landing page with filter: show only the requested status
+            project_query = project_query.eq("status", status)
+        # else: no filter — show first project of any status
 
         project_result = project_query.limit(1).execute()
 

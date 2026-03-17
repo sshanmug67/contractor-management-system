@@ -16,7 +16,7 @@ class IDashboardRepository(ABC):
 
     @abstractmethod
     async def get_owner_dashboard(
-        self, org_id: str, project_id: str = None
+        self, org_id: str, project_id: str = None, status: str = None
     ) -> dict:
         """
         Full dashboard payload: project → worksites → workgroups → jobs,

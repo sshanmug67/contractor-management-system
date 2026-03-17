@@ -31,6 +31,7 @@ router = APIRouter()
 @router.get("/owner")
 async def get_owner_dashboard(
     project_id: Optional[str] = Query(None, description="Filter by project ID"),
+    status: Optional[str] = Query(None, description="Filter by status: active, planning, etc."),
     repo: IDashboardRepository = Depends(get_dashboard_repo),
 ):
     """
@@ -63,7 +64,7 @@ async def get_owner_dashboard(
     # repo is IDashboardRepository, injected via Depends().
     # Could be Supabase or SQLAlchemy — the router doesn't know.
     logger.debug(f"Dashboard cache MISS for org {org_id} — querying database")
-    data = await repo.get_owner_dashboard(org_id, project_id)
+    data = await repo.get_owner_dashboard(org_id, project_id, status)
     return data
 
 
