@@ -14,6 +14,8 @@ Provides endpoints for dependency management and graph analysis:
   GET  /conflicts/{id}    Get resource conflicts
   GET  /cashflow/{id}     Get cash flow projection (cache-first)
   GET  /forecast/{id}     Get completion forecast
+  GET  /sensitivity/{id}  Get sensitivity analysis (cache-first)
+  POST /sensitivity/{id}/refresh  Force-refresh sensitivity analysis
 
 Cache-first pattern (same as dashboard):
   1. Check Redis L2 cache
@@ -85,6 +87,24 @@ async def _get_service(project_id: str, providers) -> tuple[DependencyService, P
     graph = ProjectGraph(**graph_dict)
     service = DependencyService(graph)
     return service, graph
+
+
+async def _build_worksite_lookup(providers, project_id: str) -> dict:
+    """
+    Build {wg_id: (worksite_id, worksite_name)} from dashboard data.
+    Used to enrich sensitivity entries with site context.
+    """
+    dashboard_data = await providers.dashboard.get_owner_dashboard(
+        DEV_ORG_ID, project_id=project_id,
+    )
+    lookup = {}
+    if dashboard_data:
+        for ws in dashboard_data.get("worksites", []):
+            ws_id = ws.get("id", "")
+            ws_name = ws.get("name", "")
+            for wg in ws.get("workgroups", []):
+                lookup[wg["id"]] = (ws_id, ws_name)
+    return lookup
 
 
 # ══════════════════════════════════════════════════════════════
@@ -396,9 +416,12 @@ async def get_completion_forecast(
     service, graph = await _get_service(project_id, providers)
     return service.completion_forecast().model_dump()
 
+
 # ══════════════════════════════════════════════════════════════
-# SENSITIVITY ANALYSIS ENDPOINTS (cache-first where applicable)
+# SENSITIVITY ANALYSIS
 # ══════════════════════════════════════════════════════════════
+
+
 @router.get("/sensitivity/{project_id}", response_model=SensitivityReport)
 async def get_sensitivity_analysis(
     project_id: str,
@@ -407,11 +430,11 @@ async def get_sensitivity_analysis(
 ):
     """
     Get sensitivity analysis for a project — cache-first.
- 
+
     Returns per-workgroup sensitivity rankings showing which WGs
     are most dangerous to delay. Computed daily by the worker and
     refreshed on job completions.
- 
+
     Query params:
         test_delay: delay days to simulate per WG (default 3).
                     Only default (3) is cached.
@@ -421,24 +444,25 @@ async def get_sensitivity_analysis(
         cached = get_cached_sensitivity(project_id)
         if cached:
             return cached
- 
+
     service, graph = await _get_service(project_id, providers)
- 
-    # Build worksite lookup for per-site grouping
-    worksite_lookup = _build_worksite_lookup(providers, project_id)
- 
+
+    # ★ FIX: was calling non-existent _build_worksite_lookup (sync, no await)
+    # Now uses the shared async helper with proper await
+    worksite_lookup = await _build_worksite_lookup(providers, project_id)
+
     report = service.sensitivity_analysis(
         test_delay=test_delay,
         worksite_lookup=worksite_lookup,
     )
     result = report.model_dump()
- 
+
     if test_delay == 3:
         set_cached_sensitivity(project_id, result)
- 
+
     return result
- 
- 
+
+
 @router.post("/sensitivity/{project_id}/refresh")
 async def refresh_sensitivity_analysis(
     project_id: str,
@@ -447,41 +471,23 @@ async def refresh_sensitivity_analysis(
 ):
     """
     Force-refresh sensitivity analysis for a project.
- 
+
     Called by the frontend "Run Sensitivity Analysis" button.
     Invalidates cache, recomputes, caches, and returns fresh results.
     """
     # Invalidate stale cache
     invalidate_sensitivity(project_id)
- 
+
     service, graph = await _get_service(project_id, providers)
-    worksite_lookup = await _build_worksite_lookup_async(providers, project_id)
- 
+    worksite_lookup = await _build_worksite_lookup(providers, project_id)
+
     report = service.sensitivity_analysis(
         test_delay=test_delay,
         worksite_lookup=worksite_lookup,
     )
     result = report.model_dump()
- 
+
     # Cache fresh results
     set_cached_sensitivity(project_id, result)
- 
+
     return result
- 
- 
-async def _build_worksite_lookup_async(providers, project_id: str) -> dict:
-    """
-    Build {wg_id: (worksite_id, worksite_name)} from dashboard data.
-    Used to enrich sensitivity entries with site context.
-    """
-    dashboard_data = await providers.dashboard.get_owner_dashboard(
-        DEV_ORG_ID, project_id=project_id,
-    )
-    lookup = {}
-    if dashboard_data:
-        for ws in dashboard_data.get("worksites", []):
-            ws_id = ws.get("id", "")
-            ws_name = ws.get("name", "")
-            for wg in ws.get("workgroups", []):
-                lookup[wg["id"]] = (ws_id, ws_name)
-    return lookup

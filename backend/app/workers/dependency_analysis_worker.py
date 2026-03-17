@@ -1,7 +1,7 @@
 """
 Dependency Analysis Worker — Periodic + Event-Driven Cache Refresh
 
-Pre-computes the full GanttData (display data + all 9 analysis methods)
+Pre-computes the full GanttData (display data + all 10 analysis methods)
 for all active projects and caches the result in Redis.
 
 When the business owner opens the Timeline tab, the data is already warm
@@ -19,8 +19,16 @@ Also caches individual analysis results for the standalone endpoints:
   cms:cache:health_snapshot:{project_id}
   cms:cache:criticality:{project_id}
   cms:cache:cashflow:{project_id}
+  cms:cache:sensitivity:{project_id}
+
+Changes from previous version:
+  ✦ Fixed: sensitivity block now inlined into _refresh_project() (was orphaned function)
+  ✦ Fixed: set_cached_sensitivity import added
+  ✦ Updated: docstring 9 → 10 analysis methods
 
 Pattern mirrors dashboard_stats_worker.py.
+
+File: app/workers/dependency_analysis_worker.py
 """
 
 import asyncio
@@ -34,6 +42,7 @@ from app.cache.dependency_cache import (
     set_cached_health_snapshot,
     set_cached_criticality,
     set_cached_cashflow,
+    set_cached_sensitivity,  # ★ FIX: was missing
 )
 
 TAG = "DEPENDENCY_ANALYSIS"
@@ -61,9 +70,9 @@ def refresh_dependency_analysis(self, project_id: str = None):
         2. For each project:
            a. Fetch dashboard data via ProviderRegistry
            b. Fetch ProjectGraph via ProviderRegistry
-           c. Run GanttData assembler (all 9 analysis methods)
+           c. Run GanttData assembler (all 10 analysis methods)
            d. Cache full GanttData in Redis
-           e. Cache individual analysis results
+           e. Cache individual analysis results (incl. sensitivity)
            f. Publish refresh event
         3. Write worker heartbeat
     """
@@ -128,8 +137,6 @@ def _refresh_project(providers, project_id: str, today: date):
     from app.services.dependency_analyzer import DependencyService
 
     # ── 1. Fetch dashboard data (display fields) ─────────
-    # We need org_id to call get_owner_dashboard. For MVP,
-    # we call get_owner_dashboard with DEV_ORG_ID + project_id.
     dashboard_data = asyncio.run(
         providers.dashboard.get_owner_dashboard(
             DEV_ORG_ID,
@@ -182,9 +189,7 @@ def _refresh_project(providers, project_id: str, today: date):
     else:
         worker_log(TAG, f"Redis write failed for project {project_id}")
 
-    # ── 5. Also cache individual analysis results ─────────
-    # These feed the standalone /health, /criticality, /cashflow endpoints
-    # so they don't need to recompute if the full GanttData is already cached.
+    # ── 5. Cache individual analysis results ──────────────
     service = DependencyService(graph)
 
     snapshot = service.health_snapshot(today=today)
@@ -196,16 +201,9 @@ def _refresh_project(providers, project_id: str, today: date):
     cashflow = service.cash_flow_projection()
     set_cached_cashflow(project_id, cashflow.model_dump())
 
-    worker_log(TAG, f"Cached individual analysis results for project {project_id}")
-
-
-def _refresh_project_sensitivity_block(service, graph, project_id, dashboard_data):
-    """
-    Paste this into _refresh_project() after the existing
-    set_cached_cashflow() call.
-    """
     # ── 6. Sensitivity Analysis ───────────────────────────
-    # Build worksite lookup from dashboard data
+    # ★ FIX: was defined as standalone function _refresh_project_sensitivity_block()
+    # that was never called. Now inlined here so it actually executes.
     worksite_lookup = {}
     if dashboard_data:
         for ws in dashboard_data.get("worksites", []):
@@ -213,17 +211,17 @@ def _refresh_project_sensitivity_block(service, graph, project_id, dashboard_dat
             ws_name = ws.get("name", "")
             for wg in ws.get("workgroups", []):
                 worksite_lookup[wg["id"]] = (ws_id, ws_name)
- 
+
     sensitivity = service.sensitivity_analysis(
         test_delay=3,
         worksite_lookup=worksite_lookup,
     )
     set_cached_sensitivity(project_id, sensitivity.model_dump())
- 
+
     worker_log(
         TAG,
-        f"Cached sensitivity analysis for project {project_id}: "
-        f"{sensitivity.total_workgroups_tested} tested, "
-        f"{sensitivity.critical_count} critical, "
-        f"{sensitivity.high_count} high"
+        f"Cached all analysis for project {project_id}: "
+        f"health, criticality, cashflow, "
+        f"sensitivity ({sensitivity.total_workgroups_tested} tested, "
+        f"{sensitivity.critical_count} critical, {sensitivity.high_count} high)"
     )

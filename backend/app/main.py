@@ -31,8 +31,15 @@ from app.routers import (
 )
 from app.auth import router as auth_router
 from app.routers import dependency_changes
+from app.routers import scaffold as scaffold_router_mod    # ★ NEW
+from app.routers import templates as templates_router_mod  # ★ NEW
+
+import logging
+_log = logging.getLogger("app.main")
 
 settings = get_settings()
+_log.info("✅ Settings loaded. Environment: %s", settings.app_env)
+_log.info("   Claude API key: %s", "SET (ends ..." + settings.claude_api_key[-6:] + ")" if settings.claude_api_key else "⚠️ NOT SET")
 
 app = FastAPI(
     title="Contractor Management System",
@@ -53,6 +60,15 @@ app.add_middleware(
 )
 
 # ── Routers ───────────────────────────────────────────
+# ★ Scaffold router MUST be registered BEFORE projects router.
+# Both share /api/projects prefix. scaffold has specific paths like
+# /api/projects/scaffold and /api/projects/quick-starts that would
+# otherwise be caught by projects' GET /{project_id} catch-all.
+app.include_router(scaffold_router_mod.router)  # ★ NEW — has own prefix /api/projects
+app.include_router(templates_router_mod.router) # ★ NEW — has own prefix /api/templates
+_log.info("✅ Scaffold router registered (prefix=%s)", scaffold_router_mod.router.prefix)
+_log.info("✅ Templates router registered (prefix=%s)", templates_router_mod.router.prefix)
+
 app.include_router(auth_router.router,      prefix="/api/auth",        tags=["Auth"])
 app.include_router(projects.router,         prefix="/api/projects",    tags=["Projects"])
 app.include_router(worksites.router,        prefix="/api/worksites",   tags=["Worksites"])
@@ -82,10 +98,20 @@ async def health_check():
 @app.on_event("startup")
 async def on_startup():
     """Initialize connections, verify Supabase, etc."""
-    # TODO: Verify Supabase connection
-    # TODO: Initialize AI agent
-    # TODO: Start background monitors
-    pass
+    _log.info("=" * 60)
+    _log.info("CMS Backend — Startup complete")
+    _log.info("=" * 60)
+    # Log scaffold-related routes
+    for route in app.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            if any(kw in route.path for kw in ['scaffold', 'template', 'quick-start']):
+                _log.info("  📌 %s %s", list(route.methods), route.path)
+    # API key check
+    if settings.claude_api_key:
+        _log.info("  ✅ Claude API key ready (ends ...%s)", settings.claude_api_key[-6:])
+    else:
+        _log.warning("  ⚠️ CLAUDE_API_KEY not set — scaffold generation will fail!")
+    _log.info("=" * 60)
 
 
 @app.on_event("shutdown")

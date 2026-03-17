@@ -5,10 +5,14 @@ Selects concrete implementations based on DB_PROVIDER env var.
 All repositories, storage, auth, and realtime providers are
 initialized here and accessed via a single registry instance.
 
+Changes from previous version:
+  ✦ Added ITemplateRepository + SupabaseTemplateRepository for Template Library
+
 Usage:
     from app.providers import get_provider_registry
     registry = get_provider_registry()
     project = await registry.projects.get_project(id)
+    templates = await registry.templates.list_templates(org_id)
 """
 
 from functools import lru_cache
@@ -27,6 +31,7 @@ from app.db.interfaces import (
     IAllocationRepository,
     IAuthRepository,
 )
+from app.db.interfaces.template_repository import ITemplateRepository
 
 
 class ProviderRegistry:
@@ -44,6 +49,7 @@ class ProviderRegistry:
         registry.dashboard   → IDashboardRepository
         registry.allocation  → IAllocationRepository
         registry.auth        → IAuthRepository
+        registry.templates   → ITemplateRepository  ★ NEW
     """
 
     # ── Repository instances (set by provider init) ───────
@@ -57,6 +63,7 @@ class ProviderRegistry:
     dashboard: IDashboardRepository
     allocation: IAllocationRepository
     auth: IAuthRepository
+    templates: ITemplateRepository  # ★ NEW — Template Library
 
     # TODO Phase B: Add these when storage/auth/realtime abstraction is built
     # storage: IStorageProvider
@@ -87,7 +94,6 @@ class ProviderRegistry:
         )
 
         # Import Supabase-specific implementations
-        # These are your EXISTING repositories — they just moved directories.
         from app.db.providers.supabase.project_queries import ProjectRepository
         from app.db.providers.supabase.worksite_queries import WorksiteRepository
         from app.db.providers.supabase.workgroup_queries import WorkgroupRepository
@@ -98,6 +104,7 @@ class ProviderRegistry:
         from app.db.providers.supabase.dashboard_queries import DashboardRepository
         from app.db.providers.supabase.allocation_queries import AllocationRepository
         from app.db.providers.supabase.auth_queries import AuthRepository
+        from app.db.providers.supabase.template_queries import SupabaseTemplateRepository  # ★ NEW
 
         self.projects = ProjectRepository(client)
         self.worksites = WorksiteRepository(client)
@@ -109,6 +116,7 @@ class ProviderRegistry:
         self.dashboard = DashboardRepository(client)
         self.allocation = AllocationRepository(client)
         self.auth = AuthRepository(client)
+        self.templates = SupabaseTemplateRepository(client)  # ★ NEW — Template Library
 
     def _init_postgres(self, settings):
         """
@@ -119,14 +127,6 @@ class ProviderRegistry:
             "PostgreSQL (self-hosted) provider is planned for Phase B. "
             "Set DB_PROVIDER=supabase for now."
         )
-        # Future implementation:
-        # from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-        # engine = create_async_engine(settings.database_url)
-        # session_factory = async_sessionmaker(engine)
-        #
-        # from app.db.providers.sqlalchemy.project_repository import ...
-        # self.projects = SQLAlchemyProjectRepository(session_factory)
-        # ... etc
 
 
 @lru_cache()

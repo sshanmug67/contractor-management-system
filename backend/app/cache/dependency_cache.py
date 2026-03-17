@@ -144,7 +144,21 @@ def set_cached_sensitivity(project_id: str, data: dict) -> bool:
     )
 
 
-# ── Invalidation ─────────────────────────────────────────
+def invalidate_sensitivity(project_id: str) -> None:
+    """
+    Invalidate only the sensitivity cache for a project.
+
+    Called by POST /sensitivity/{id}/refresh to force recomputation
+    without clearing all other analysis caches (gantt, health, etc.).
+
+    For clearing ALL caches, use invalidate_project_analysis() instead.
+    """
+    client = get_redis_client()
+    client.delete_key(f"cms:cache:sensitivity:{project_id}")
+    logger.info(f"Invalidated sensitivity cache for project {project_id}")
+
+
+# ── Invalidation (all caches) ────────────────────────────
 
 def invalidate_project_analysis(project_id: str) -> None:
     """
@@ -161,7 +175,7 @@ def invalidate_project_analysis(project_id: str) -> None:
         f"cms:cache:criticality:{project_id}",
         f"cms:cache:cashflow:{project_id}",
         f"cms:cache:delay_insights:{project_id}",
-        f"cms:cache:sensitivity:{project_id}",       # ★ FIX: was missing
+        f"cms:cache:sensitivity:{project_id}",
     ]
     for key in keys:
         client.delete_key(key)

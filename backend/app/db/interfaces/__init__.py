@@ -15,6 +15,8 @@ from app.db.interfaces.checkin_repository import ICheckinRepository
 from app.db.interfaces.dashboard_repository import IDashboardRepository
 from app.db.interfaces.allocation_repository import IAllocationRepository
 from app.db.interfaces.auth_repository import IAuthRepository
+from app.db.interfaces.template_repository import ITemplateRepository
+
 
 __all__ = [
     "IProjectRepository",
@@ -27,4 +29,5 @@ __all__ = [
     "IDashboardRepository",
     "IAllocationRepository",
     "IAuthRepository",
+    "ITemplateRepository",
 ]

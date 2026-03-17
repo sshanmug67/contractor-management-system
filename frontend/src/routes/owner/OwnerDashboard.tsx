@@ -478,6 +478,22 @@ export function OwnerDashboard() {
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => navigate("projects/new")}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "7px 16px", borderRadius: 9, border: "none",
+                background: "linear-gradient(135deg, #3D6B5E, #5AAE8F)",
+                color: "#fff", fontSize: 13, fontWeight: 700,
+                cursor: "pointer", fontFamily: "'Outfit', sans-serif",
+                transition: "all .15s", boxShadow: "0 2px 8px rgba(61,107,94,0.25)",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(61,107,94,0.3)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(61,107,94,0.25)"; }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              New Project
+            </button>
             <button onClick={refresh} style={{ position: "relative", width: 34, height: 34, borderRadius: 9, border: "1px solid #ECEAE6", background: "#FAFAF8", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }} title="Refresh">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8C7E6A" strokeWidth="2" strokeLinecap="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
               {(stats.pendingInvoices > 0 || kpis.projectsAtRisk > 0) && (
@@ -519,11 +535,67 @@ export function OwnerDashboard() {
             <div style={{ width: 3, height: 16, borderRadius: 2, background: "linear-gradient(180deg, #3D6B5E, #5AAE8F)" }} />
             <h2 style={{ fontSize: 17, fontWeight: 800, color: "#1A1814" }}>Project Portfolio</h2>
             <span style={{ fontSize: 14, color: "#9C8E7C" }}>{projects.length} projects</span>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => navigate("projects/new")}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "5px 12px", borderRadius: 7,
+                border: "1.5px solid #B5E2CC", background: "#EDFAF4",
+                fontSize: 12, fontWeight: 700, color: "#2E7D5F",
+                cursor: "pointer", fontFamily: "'Outfit', sans-serif",
+                transition: "all .15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#d5f5e6"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#EDFAF4"; }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2E7D5F" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              New
+            </button>
           </div>
 
           {projects.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", borderRadius: 16, background: "#fff", border: "1px solid #ECEAE6" }}>
-              <p style={{ fontSize: 17, color: "#9C8E7C" }}>No projects yet. Create your first project to get started.</p>
+            <div style={{
+              padding: "48px 40px", textAlign: "center", borderRadius: 16,
+              background: "#fff", border: "2px dashed #DDD7CC",
+              animation: "fadeUp .3s .2s both",
+            }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: 14, margin: "0 auto 16px",
+                background: "linear-gradient(135deg, #EDFAF4, #d5f5e6)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3D6B5E" strokeWidth="2" strokeLinecap="round">
+                  <rect x="3" y="3" width="18" height="18" rx="3" />
+                  <line x1="12" y1="8" x2="12" y2="16" />
+                  <line x1="8" y1="12" x2="16" y2="12" />
+                </svg>
+              </div>
+              <p style={{ fontSize: 17, fontWeight: 700, color: "#1A1814", marginBottom: 4 }}>
+                No projects yet
+              </p>
+              <p style={{ fontSize: 13, color: "#8C7E6A", marginBottom: 20, lineHeight: 1.5 }}>
+                Create your first project with AI-powered planning
+              </p>
+              <button
+                onClick={() => navigate("projects/new")}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 8,
+                  padding: "12px 28px", borderRadius: 10, border: "none",
+                  background: "linear-gradient(135deg, #3D6B5E, #5AAE8F)",
+                  color: "#fff", fontSize: 15, fontWeight: 700,
+                  cursor: "pointer", fontFamily: "'Outfit', sans-serif",
+                  boxShadow: "0 2px 12px rgba(61,107,94,0.25)",
+                  transition: "all .15s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(61,107,94,0.3)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 12px rgba(61,107,94,0.25)"; }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                </svg>
+                Create your first project
+              </button>
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

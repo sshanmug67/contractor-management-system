@@ -6,6 +6,7 @@ import { ProtectedRoute } from './routes/ProtectedRoute';
 // Owner pages
 import { OwnerDashboard } from './routes/owner/OwnerDashboard';
 import { ProjectListPage } from './routes/owner/ProjectListPage';
+import { CreateProjectPage } from './routes/owner/CreateProjectPage';
 import { ProjectDetailPage } from './routes/owner/ProjectDetailPage';
 import { WorkgroupDetailPage as OwnerWorkgroupDetail } from './routes/owner/WorkgroupDetailPage';
 import { ContractorPoolPage } from './routes/owner/ContractorPoolPage';
@@ -35,6 +36,7 @@ function App() {
       >
         <Route index element={<OwnerDashboard />} />
         <Route path="projects" element={<ProjectListPage />} />
+        <Route path="projects/new" element={<CreateProjectPage />} />
         <Route path="projects/:projectId" element={<ProjectDetailPage />} />
         <Route path="workgroups/:workgroupId" element={<OwnerWorkgroupDetail />} />
         <Route path="contractors" element={<ContractorPoolPage />} />
