@@ -113,6 +113,7 @@ interface ProjectCardData {
   title: string;
   subtitle: string;
   client: string;
+  status: string;          // ★ lifecycle status: planning, active, complete, etc.
   contractValue: number;
   invoicedToClient: number;
   receivedFromClient: number;
@@ -148,6 +149,7 @@ function bridgeProject(proj: UIProject, pendingInvoices: UIPendingInvoice[]): Pr
     title: proj.title.split(" — ")[0] || proj.title,
     subtitle: proj.title.split(" — ")[1] || "",
     client: (proj as any).client || proj.title.split(" — ")[0] || "",
+    status: proj.status,   // ★ pass through lifecycle status
     // BRIDGE: Using totalBudget as proxy for contractValue
     contractValue: (proj as any).contractValue || proj.totalBudget,
     // BRIDGE: Using totalSpent + totalInvoiced as proxy
@@ -202,11 +204,24 @@ function bridgePortfolio(stats: UIStats, projects: ProjectCardData[]): Portfolio
 }
 
 /* ═══════════════════ PROJECT CARD COMPONENT ═══════════════════ */
+
+const STATUS_STYLES: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  active:   { label: "Active",   color: "#2E7D5F", bg: "#EDFAF4", border: "#B5E2CC" },
+  planning: { label: "Planning", color: "#C07B1A", bg: "#FFF8EE", border: "#F0D9A8" },
+  complete: { label: "Complete", color: "#2D6DB5", bg: "#EFF5FC", border: "#B3D4F0" },
+  review:   { label: "Review",   color: "#7B5EA7", bg: "#F8F4FC", border: "#E0D4F0" },
+  on_hold:  { label: "On Hold",  color: "#8C7E6A", bg: "#F5F3EF", border: "#DDD7CC" },
+  draft:    { label: "Draft",    color: "#8C7E6A", bg: "#F5F3EF", border: "#DDD7CC" },
+};
+
 function ProjectCard({ proj, isHovered, onHover, onLeave, onClick, delay }: {
   proj: ProjectCardData; isHovered: boolean;
   onHover: () => void; onLeave: () => void; onClick: () => void;
   delay: number;
 }) {
+  const isPlanning = proj.status === "planning" || proj.status === "draft";
+  const ss = STATUS_STYLES[proj.status] || STATUS_STYLES.active;
+
   const workDone = pct(proj.jobsDone, proj.jobsCount);
   const invoicedPct = pct(proj.invoicedToClient, proj.contractValue);
   const costsPaidPct = pct(proj.paidToContractors, proj.contractValue);
@@ -224,165 +239,225 @@ function ProjectCard({ proj, isHovered, onHover, onLeave, onClick, delay }: {
       onMouseEnter={onHover} onMouseLeave={onLeave} onClick={onClick}
       style={{
         borderRadius: 16, background: "#fff",
-        border: `2px solid ${isHovered ? "#A89880" : "#C4B5A2"}`,
+        border: `2px solid ${isHovered ? "#A89880" : isPlanning ? "#D4C9B8" : "#C4B5A2"}`,
         overflow: "hidden", cursor: "pointer",
         transition: "all .22s ease",
         transform: isHovered ? "translateY(-2px)" : "none",
         boxShadow: isHovered ? "0 10px 28px -6px rgba(0,0,0,0.07)" : "0 1px 2px rgba(0,0,0,0.02)",
         animation: `scaleUp .4s ${delay}ms both`,
+        opacity: isPlanning ? 0.92 : 1,
       }}
     >
-      {/* ── BENTO GRID ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 185px", minHeight: 240 }}>
-
-        {/* LEFT: Financials */}
-        <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column" }}>
-          {/* Title */}
-          <div style={{ marginBottom: 10 }}>
+      {isPlanning ? (
+        /* ═══ PLANNING CARD — Simplified layout ═══ */
+        <div style={{ padding: "16px 18px" }}>
+          {/* Title + status */}
+          <div style={{ marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
               <h3 style={{ fontSize: 18, fontWeight: 800, color: "#1A1814", letterSpacing: "-0.01em", fontFamily: "'Outfit', system-ui, sans-serif" }}>{proj.title}</h3>
-              <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: schedBg, color: schedColor, letterSpacing: "0.02em" }}>{schedLabel}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: ss.bg, color: ss.color, border: `1px solid ${ss.border}`, letterSpacing: "0.04em", textTransform: "uppercase" }}>{ss.label}</span>
             </div>
             <p style={{ fontSize: 13, color: "#6B5F4F", fontWeight: 500 }}>{proj.subtitle}{proj.subtitle && " · "}{proj.client}</p>
           </div>
 
-          {/* Stats pills */}
-          <div style={{ display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap" }}>
-            {[
-              { label: "Sites", value: proj.worksites, color: "#3D6B5E" },
-              { label: "Trades", value: proj.workgroups, color: "#2D6DB5" },
-              { label: "Jobs", value: `${proj.jobsDone}/${proj.jobsCount}`, color: "#5A6B7C" },
-              { label: "Contractors", value: proj.activeContractors, color: "#7B5EA7" },
-              ...(proj.changeOrders > 0 ? [{ label: "COs", value: proj.changeOrders, color: "#C07B1A" }] : []),
-              ...(proj.openIssues > 0 ? [{ label: "Issues", value: proj.openIssues, color: "#D44A2E" }] : []),
-            ].map(tag => (
-              <span key={tag.label} style={{
-                display: "inline-flex", alignItems: "center", gap: 3,
-                padding: "2px 7px", borderRadius: 5, fontSize: 12, fontWeight: 600,
-                background: `${tag.color}0A`, color: tag.color, border: `1px solid ${tag.color}18`,
-              }}>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800 }}>{tag.value}</span> {tag.label}
-              </span>
-            ))}
-          </div>
-
-          {/* Donut + financials */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
-            <Donut size={100} sw={11}
-              segments={[
-                { value: pct(proj.receivedFromClient, proj.contractValue), color: "#3D8B6E" },
-                { value: pct(proj.invoicedToClient - proj.receivedFromClient, proj.contractValue), color: "#A8D5B8" },
-              ]}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "#9C8E7C", textTransform: "uppercase", letterSpacing: "0.06em" }}>Contract</span>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 800, color: "#1A1814", lineHeight: 1 }}>{fmt(proj.contractValue)}</span>
+          {/* Budget highlight + stats */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            {/* Budget donut */}
+            <Donut size={80} sw={9} segments={[{ value: 0, color: "#EDEAE5" }]}>
+              <span style={{ fontSize: 9, fontWeight: 700, color: "#9C8E7C", textTransform: "uppercase", letterSpacing: "0.06em" }}>Budget</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, fontWeight: 800, color: "#1A1814", lineHeight: 1 }}>{fmt(proj.contractValue)}</span>
             </Donut>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
-              {[
-                { label: "Received", value: fmt(proj.receivedFromClient), p: `${pct(proj.receivedFromClient, proj.contractValue)}%`, color: "#3D8B6E", dot: "#3D8B6E" },
-                { label: "Invoiced", value: fmt(Math.max(proj.invoicedToClient - proj.receivedFromClient, 0)), p: "unpaid", color: "#6BAA82", dot: "#A8D5B8" },
-                { label: "Paid out", value: fmt(proj.paidToContractors), p: `${costsPaidPct}%`, color: "#D44A2E", dot: "#E8705A" },
-              ].map(item => (
-                <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 2, background: item.dot, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: "#5C5043", minWidth: 42 }}>{item.label}</span>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: item.color }}>{item.value}</span>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#8C7E6A" }}>{item.p}</span>
-                </div>
-              ))}
-              <div style={{
-                marginTop: 2, padding: "3px 7px", borderRadius: 5, alignSelf: "flex-start",
-                background: cashPos ? "#EDFAF4" : "#FEF0ED",
-                display: "inline-flex", alignItems: "center", gap: 3,
-              }}>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 800, color: cashPos ? "#3D8B6E" : "#D44A2E" }}>
-                  {cashPos ? "+" : ""}{fmt(cashPosition)}
-                </span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: cashPos ? "#6BAA82" : "#E8705A" }}>cash</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT: Stacked panels */}
-        <div style={{ display: "flex", flexDirection: "column", borderLeft: "2px solid #C4B5A2", background: "#F2EDE5" }}>
-
-          {/* Work vs Billing */}
-          <div style={{ flex: 1, padding: "12px 10px", borderBottom: "1px solid #D4C9B8" }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: "#2C2A26", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Work vs Billing</span>
-            <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-              <div style={{ flex: 1, textAlign: "center" }}>
-                <Donut size={50} sw={6} segments={[{ value: workDone, color: "#2D6DB5" }]}>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 800, color: "#2D6DB5" }}>{workDone}%</span>
-                </Donut>
-                <p style={{ fontSize: 10, fontWeight: 600, color: "#2C2A26", marginTop: 2 }}>DONE</p>
-              </div>
-              <div style={{ flex: 1, textAlign: "center" }}>
-                <Donut size={50} sw={6} segments={[{ value: invoicedPct, color: "#3D8B6E" }]}>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 800, color: "#3D8B6E" }}>{invoicedPct}%</span>
-                </Donut>
-                <p style={{ fontSize: 10, fontWeight: 600, color: "#2C2A26", marginTop: 2 }}>BILLED</p>
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 5px", borderRadius: 4, background: "rgba(255,255,255,0.7)" }}>
-              <span style={{ fontSize: 11, color: "#4A4239" }}>Margin</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 800, color: proj.currentMargin >= 15 ? "#3D8B6E" : proj.currentMargin >= 10 ? "#C07B1A" : "#D44A2E" }}>{proj.currentMargin}%</span>
-                {marginDelta !== 0 && <span style={{ fontSize: 11, fontWeight: 700, color: marginDelta > 0 ? "#3D8B6E" : "#D44A2E" }}>{marginDelta > 0 ? "↑" : "↓"}{Math.abs(marginDelta)}</span>}
-              </div>
-            </div>
-          </div>
-
-          {/* Pending Invoices + Risk */}
-          <div style={{ flex: 1, padding: "10px 10px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: "#2C2A26", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 5 }}>Contractor Invoices</span>
-            {hasPending ? (
-              <>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 3, marginBottom: 4 }}>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 19, fontWeight: 800, color: "#C07B1A" }}>{proj.pendingContractorInvoices.length}</span>
-                  <span style={{ fontSize: 12, color: "#6B5F4F" }}>pending</span>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#C07B1A" }}>{fmtFull(pendingTotal)}</span>
-                </div>
-                {proj.pendingContractorInvoices.slice(0, 2).map((inv, j) => (
-                  <div key={j} style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: 1 }}>
-                    <span style={{ width: 3, height: 3, borderRadius: 2, background: "#E5963C", flexShrink: 0 }} />
-                    <span style={{ fontSize: 11, color: "#5C5043", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{inv.contractor}</span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, color: "#C07B1A", flexShrink: 0 }}>{fmt(inv.amount)}</span>
-                  </div>
+            {/* Stats pills */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+              <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                {[
+                  { label: "Sites", value: proj.worksites, color: "#3D6B5E" },
+                  { label: "Trades", value: proj.workgroups, color: "#2D6DB5" },
+                  { label: "Jobs", value: proj.jobsCount, color: "#5A6B7C" },
+                ].map(tag => (
+                  <span key={tag.label} style={{
+                    display: "inline-flex", alignItems: "center", gap: 3,
+                    padding: "2px 7px", borderRadius: 5, fontSize: 12, fontWeight: 600,
+                    background: `${tag.color}0A`, color: tag.color, border: `1px solid ${tag.color}18`,
+                  }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800 }}>{tag.value}</span> {tag.label}
+                  </span>
                 ))}
-              </>
-            ) : (
-              <span style={{ fontSize: 13, color: "#3D8B6E", fontWeight: 600 }}>✓ All clear</span>
-            )}
-            {proj.riskFlag && (
-              <div style={{ marginTop: 5, padding: "3px 5px", borderRadius: 4, background: "#FEF0ED" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#D44A2E" }}>⚠ {proj.riskFlag}</span>
               </div>
-            )}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "#8C7E6A", display: "flex", alignItems: "center", gap: 3 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#8C7E6A" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                  Start: {proj.startDate ? new Date(proj.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }) : "TBD"}
+                </span>
+              </div>
+              <p style={{ fontSize: 12, color: "#9C8E7C", fontStyle: "italic" }}>
+                No contractors assigned yet · Ready for setup
+              </p>
+            </div>
+          </div>
+
+          {/* Hover arrow */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#3D6B5E", opacity: isHovered ? 1 : 0, transition: "opacity .2s" }}>Set up project →</span>
           </div>
         </div>
-      </div>
+      ) : (
+        /* ═══ ACTIVE CARD — Full layout (existing) ═══ */
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 185px", minHeight: 240 }}>
 
-      {/* Bottom bar */}
-      <div style={{ padding: "8px 16px", background: "#FAFAF8", borderTop: "2px solid #C4B5A2", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 12, color: "#8C7E6A", display: "flex", alignItems: "center", gap: 3 }}>
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#8C7E6A" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-            {proj.startDate ? new Date(proj.startDate).toLocaleDateString("en-US", { month: "short", year: "2-digit" }) : "TBD"}
-            {" → "}
-            {proj.endDate ? new Date(proj.endDate).toLocaleDateString("en-US", { month: "short", year: "2-digit" }) : "TBD"}
-            {proj.forecastEnd && proj.forecastEnd !== proj.endDate && (
-              <span style={{ color: "#D44A2E", fontWeight: 600 }}> (fcst: {new Date(proj.forecastEnd).toLocaleDateString("en-US", { month: "short" })})</span>
-            )}
-          </span>
-          {proj.nextMilestone && (
-            <span style={{ fontSize: 12, color: "#8C7E6A", display: "flex", alignItems: "center", gap: 2 }}>
-              <span style={{ color: "#8C7E6A" }}>·</span> Next: <span style={{ fontWeight: 600, color: "#3D3529" }}>{proj.nextMilestone}</span>
-            </span>
-          )}
-        </div>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#3D6B5E", opacity: isHovered ? 1 : 0, transition: "opacity .2s" }}>View →</span>
-      </div>
+            {/* LEFT: Financials */}
+            <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column" }}>
+              {/* Title */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: "#1A1814", letterSpacing: "-0.01em", fontFamily: "'Outfit', system-ui, sans-serif" }}>{proj.title}</h3>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: ss.bg, color: ss.color, border: `1px solid ${ss.border}`, letterSpacing: "0.04em", textTransform: "uppercase" }}>{ss.label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: schedBg, color: schedColor, letterSpacing: "0.02em" }}>{schedLabel}</span>
+                </div>
+                <p style={{ fontSize: 13, color: "#6B5F4F", fontWeight: 500 }}>{proj.subtitle}{proj.subtitle && " · "}{proj.client}</p>
+              </div>
+
+              {/* Stats pills */}
+              <div style={{ display: "flex", gap: 3, marginBottom: 10, flexWrap: "wrap" }}>
+                {[
+                  { label: "Sites", value: proj.worksites, color: "#3D6B5E" },
+                  { label: "Trades", value: proj.workgroups, color: "#2D6DB5" },
+                  { label: "Jobs", value: `${proj.jobsDone}/${proj.jobsCount}`, color: "#5A6B7C" },
+                  { label: "Contractors", value: proj.activeContractors, color: "#7B5EA7" },
+                  ...(proj.changeOrders > 0 ? [{ label: "COs", value: proj.changeOrders, color: "#C07B1A" }] : []),
+                  ...(proj.openIssues > 0 ? [{ label: "Issues", value: proj.openIssues, color: "#D44A2E" }] : []),
+                ].map(tag => (
+                  <span key={tag.label} style={{
+                    display: "inline-flex", alignItems: "center", gap: 3,
+                    padding: "2px 7px", borderRadius: 5, fontSize: 12, fontWeight: 600,
+                    background: `${tag.color}0A`, color: tag.color, border: `1px solid ${tag.color}18`,
+                  }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800 }}>{tag.value}</span> {tag.label}
+                  </span>
+                ))}
+              </div>
+
+              {/* Donut + financials */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+                <Donut size={100} sw={11}
+                  segments={[
+                    { value: pct(proj.receivedFromClient, proj.contractValue), color: "#3D8B6E" },
+                    { value: pct(proj.invoicedToClient - proj.receivedFromClient, proj.contractValue), color: "#A8D5B8" },
+                  ]}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#9C8E7C", textTransform: "uppercase", letterSpacing: "0.06em" }}>Contract</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 800, color: "#1A1814", lineHeight: 1 }}>{fmt(proj.contractValue)}</span>
+                </Donut>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+                  {[
+                    { label: "Received", value: fmt(proj.receivedFromClient), p: `${pct(proj.receivedFromClient, proj.contractValue)}%`, color: "#3D8B6E", dot: "#3D8B6E" },
+                    { label: "Invoiced", value: fmt(Math.max(proj.invoicedToClient - proj.receivedFromClient, 0)), p: "unpaid", color: "#6BAA82", dot: "#A8D5B8" },
+                    { label: "Paid out", value: fmt(proj.paidToContractors), p: `${costsPaidPct}%`, color: "#D44A2E", dot: "#E8705A" },
+                  ].map(item => (
+                    <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 2, background: item.dot, flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, color: "#5C5043", minWidth: 42 }}>{item.label}</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: item.color }}>{item.value}</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#8C7E6A" }}>{item.p}</span>
+                    </div>
+                  ))}
+                  <div style={{
+                    marginTop: 2, padding: "3px 7px", borderRadius: 5, alignSelf: "flex-start",
+                    background: cashPos ? "#EDFAF4" : "#FEF0ED",
+                    display: "inline-flex", alignItems: "center", gap: 3,
+                  }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 800, color: cashPos ? "#3D8B6E" : "#D44A2E" }}>
+                      {cashPos ? "+" : ""}{fmt(cashPosition)}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: cashPos ? "#6BAA82" : "#E8705A" }}>cash</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT: Stacked panels */}
+            <div style={{ display: "flex", flexDirection: "column", borderLeft: "2px solid #C4B5A2", background: "#F2EDE5" }}>
+
+              {/* Work vs Billing */}
+              <div style={{ flex: 1, padding: "12px 10px", borderBottom: "1px solid #D4C9B8" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#2C2A26", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Work vs Billing</span>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  <div style={{ flex: 1, textAlign: "center" }}>
+                    <Donut size={50} sw={6} segments={[{ value: workDone, color: "#2D6DB5" }]}>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 800, color: "#2D6DB5" }}>{workDone}%</span>
+                    </Donut>
+                    <p style={{ fontSize: 10, fontWeight: 600, color: "#2C2A26", marginTop: 2 }}>DONE</p>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "center" }}>
+                    <Donut size={50} sw={6} segments={[{ value: invoicedPct, color: "#3D8B6E" }]}>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 800, color: "#3D8B6E" }}>{invoicedPct}%</span>
+                    </Donut>
+                    <p style={{ fontSize: 10, fontWeight: 600, color: "#2C2A26", marginTop: 2 }}>BILLED</p>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 5px", borderRadius: 4, background: "rgba(255,255,255,0.7)" }}>
+                  <span style={{ fontSize: 11, color: "#4A4239" }}>Margin</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 800, color: proj.currentMargin >= 15 ? "#3D8B6E" : proj.currentMargin >= 10 ? "#C07B1A" : "#D44A2E" }}>{proj.currentMargin}%</span>
+                    {marginDelta !== 0 && <span style={{ fontSize: 11, fontWeight: 700, color: marginDelta > 0 ? "#3D8B6E" : "#D44A2E" }}>{marginDelta > 0 ? "↑" : "↓"}{Math.abs(marginDelta)}</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Pending Invoices + Risk */}
+              <div style={{ flex: 1, padding: "10px 10px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#2C2A26", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 5 }}>Contractor Invoices</span>
+                {hasPending ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 3, marginBottom: 4 }}>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 19, fontWeight: 800, color: "#C07B1A" }}>{proj.pendingContractorInvoices.length}</span>
+                      <span style={{ fontSize: 12, color: "#6B5F4F" }}>pending</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#C07B1A" }}>{fmtFull(pendingTotal)}</span>
+                    </div>
+                    {proj.pendingContractorInvoices.slice(0, 2).map((inv, j) => (
+                      <div key={j} style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: 1 }}>
+                        <span style={{ width: 3, height: 3, borderRadius: 2, background: "#E5963C", flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, color: "#5C5043", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{inv.contractor}</span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, color: "#C07B1A", flexShrink: 0 }}>{fmt(inv.amount)}</span>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <span style={{ fontSize: 13, color: "#3D8B6E", fontWeight: 600 }}>✓ All clear</span>
+                )}
+                {proj.riskFlag && (
+                  <div style={{ marginTop: 5, padding: "3px 5px", borderRadius: 4, background: "#FEF0ED" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#D44A2E" }}>⚠ {proj.riskFlag}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom bar */}
+          <div style={{ padding: "8px 16px", background: "#FAFAF8", borderTop: "2px solid #C4B5A2", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "#8C7E6A", display: "flex", alignItems: "center", gap: 3 }}>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#8C7E6A" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                {proj.startDate ? new Date(proj.startDate).toLocaleDateString("en-US", { month: "short", year: "2-digit" }) : "TBD"}
+                {" → "}
+                {proj.endDate ? new Date(proj.endDate).toLocaleDateString("en-US", { month: "short", year: "2-digit" }) : "TBD"}
+                {proj.forecastEnd && proj.forecastEnd !== proj.endDate && (
+                  <span style={{ color: "#D44A2E", fontWeight: 600 }}> (fcst: {new Date(proj.forecastEnd).toLocaleDateString("en-US", { month: "short" })})</span>
+                )}
+              </span>
+              {proj.nextMilestone && (
+                <span style={{ fontSize: 12, color: "#8C7E6A", display: "flex", alignItems: "center", gap: 2 }}>
+                  <span style={{ color: "#8C7E6A" }}>·</span> Next: <span style={{ fontWeight: 600, color: "#3D3529" }}>{proj.nextMilestone}</span>
+                </span>
+              )}
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#3D6B5E", opacity: isHovered ? 1 : 0, transition: "opacity .2s" }}>View →</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -393,6 +468,7 @@ export function OwnerDashboard() {
   const [ready, setReady] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
   const [time, setTime] = useState(new Date());
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "planning" | "complete">("all");
 
   useEffect(() => {
     requestAnimationFrame(() => setReady(true));
@@ -474,7 +550,7 @@ export function OwnerDashboard() {
           <div>
             <h1 style={{ fontSize: 21, fontWeight: 800, color: "#1A1814", letterSpacing: "-0.02em" }}>{greeting}, Tom</h1>
             <p style={{ fontSize: 15, color: "#8C7E6A", fontWeight: 500, marginTop: 1 }}>
-              {time.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} · {rawProjects.length} active projects
+              {time.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} · {rawProjects.filter(p => p.status === "active").length} active projects
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -531,7 +607,7 @@ export function OwnerDashboard() {
 
         {/* ── LEFT: Project Cards ── */}
         <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px 40px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
             <div style={{ width: 3, height: 16, borderRadius: 2, background: "linear-gradient(180deg, #3D6B5E, #5AAE8F)" }} />
             <h2 style={{ fontSize: 17, fontWeight: 800, color: "#1A1814" }}>Project Portfolio</h2>
             <span style={{ fontSize: 14, color: "#9C8E7C" }}>{projects.length} projects</span>
@@ -554,7 +630,53 @@ export function OwnerDashboard() {
             </button>
           </div>
 
-          {projects.length === 0 ? (
+          {/* ★ Status Filter Tabs */}
+          <div style={{ display: "flex", gap: 2, marginBottom: 14, background: "#ECEAE6", borderRadius: 8, padding: 2, width: "fit-content" }}>
+            {([
+              { key: "all", label: "All", count: projects.length },
+              { key: "active", label: "Active", count: projects.filter(p => p.status === "active").length },
+              { key: "planning", label: "Planning", count: projects.filter(p => p.status === "planning" || p.status === "draft").length },
+              { key: "complete", label: "Complete", count: projects.filter(p => p.status === "complete").length },
+            ] as const).map(tab => {
+              const isActive = statusFilter === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setStatusFilter(tab.key)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 4,
+                    padding: "5px 12px", borderRadius: 6, border: "none",
+                    background: isActive ? "#fff" : "transparent",
+                    boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+                    fontSize: 12, fontWeight: isActive ? 700 : 500,
+                    color: isActive ? "#1A1814" : "#8C7E6A",
+                    cursor: "pointer", fontFamily: "'Outfit', sans-serif",
+                    transition: "all .15s",
+                  }}
+                >
+                  {tab.label}
+                  {tab.count > 0 && (
+                    <span style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 10, fontWeight: 700,
+                      padding: "1px 5px", borderRadius: 4,
+                      background: isActive ? "#ECEAE6" : "transparent",
+                      color: isActive ? "#5C5043" : "#9C8E7C",
+                    }}>{tab.count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {(() => {
+            const filtered = statusFilter === "all"
+              ? projects
+              : statusFilter === "planning"
+                ? projects.filter(p => p.status === "planning" || p.status === "draft")
+                : projects.filter(p => p.status === statusFilter);
+
+            return filtered.length === 0 ? (
             <div style={{
               padding: "48px 40px", textAlign: "center", borderRadius: 16,
               background: "#fff", border: "2px dashed #DDD7CC",
@@ -572,10 +694,10 @@ export function OwnerDashboard() {
                 </svg>
               </div>
               <p style={{ fontSize: 17, fontWeight: 700, color: "#1A1814", marginBottom: 4 }}>
-                No projects yet
+                {statusFilter === "all" ? "No projects yet" : `No ${statusFilter} projects`}
               </p>
               <p style={{ fontSize: 13, color: "#8C7E6A", marginBottom: 20, lineHeight: 1.5 }}>
-                Create your first project with AI-powered planning
+                {statusFilter === "all" ? "Create your first project with AI-powered planning" : "Try a different filter or create a new project"}
               </p>
               <button
                 onClick={() => navigate("projects/new")}
@@ -599,7 +721,7 @@ export function OwnerDashboard() {
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              {projects.map((proj, i) => (
+              {filtered.map((proj, i) => (
                 <ProjectCard
                   key={proj.id}
                   proj={proj}
@@ -611,7 +733,8 @@ export function OwnerDashboard() {
                 />
               ))}
             </div>
-          )}
+          );
+          })()}
         </div>
 
         {/* ── RIGHT SIDEBAR ── */}
