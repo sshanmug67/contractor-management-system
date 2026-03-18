@@ -92,6 +92,9 @@ class Settings:
         self.allocation_weight_proximity: float = 0.15
         self.allocation_weight_pricing: float = 0.10
 
+        # ── Service APIs ─────────────────────────────
+        self.google_maps_api_key: str = ""          # Google Maps Platform (geocoding, places, verification)
+
         # ── Database Provider ─────────────────────────
         self.db_provider: str = "supabase"          # 'supabase' or 'postgres'
 
@@ -369,6 +372,11 @@ class Settings:
         if os.getenv("INVOICE_AUTO_APPROVE_BELOW"):
             self.invoice_auto_approve_below = float(os.getenv("INVOICE_AUTO_APPROVE_BELOW"))
 
+        # ── Service APIs ─────────────────────────────
+        if os.getenv("GOOGLE_MAPS_API_KEY"):
+            self.google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+            logger.info("✓ GOOGLE_MAPS_API_KEY: Set")
+
         # ── Redis ─────────────────────────────────────
         if os.getenv("REDIS_URL"):
             self.redis_url = os.getenv("REDIS_URL")
@@ -425,6 +433,10 @@ class Settings:
         # ── Warning: AI key ───────────────────────────
         if not self.claude_api_key:
             logger.warning("⚠️  CLAUDE_API_KEY not set — AI agent features will be disabled")
+
+        # ── Warning: Google Maps key ─────────────────
+        if not self.google_maps_api_key:
+            logger.warning("⚠️  GOOGLE_MAPS_API_KEY not set — geocoding/address verification disabled (geofence still works)")
 
         # ── Auth ──────────────────────────────────────
         if self.qr_token_secret == "change-me-in-production" and self.app_env != "development":
@@ -525,6 +537,10 @@ class Settings:
             f"  Auto-Approve Below: ${self.invoice_auto_approve_below:,.2f}",
             f"  Allocation Weights: Skill={self.allocation_weight_skill} Perf={self.allocation_weight_performance} Avail={self.allocation_weight_availability} Prox={self.allocation_weight_proximity} Price={self.allocation_weight_pricing}",
             f"",
+            f"Geo Service:",
+            f"  Google Maps API Key: {'✅ Set' if self.google_maps_api_key else '⚠️  Not set (geocoding disabled, geofence still works)'}",
+            f"  Geo-Fence Radius: {self.default_geo_fence_radius_m}m",
+            f"",
             f"Redis: {self.redis_url}",
             f"",
             f"Database Provider: {self.db_provider.upper()}",
@@ -594,6 +610,9 @@ class Settings:
                 "geo_fence_radius_m": self.default_geo_fence_radius_m,
                 "invoice_variance_pct": self.invoice_variance_threshold_pct,
                 "invoice_auto_approve_below": self.invoice_auto_approve_below,
+            },
+            "geo_service": {
+                "google_maps_api_key_set": bool(self.google_maps_api_key),
             },
         }
 

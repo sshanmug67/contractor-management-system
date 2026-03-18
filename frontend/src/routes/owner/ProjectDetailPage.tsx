@@ -29,6 +29,8 @@ import { WorkgroupDrawer } from "./components/WorkgroupDrawer";
 import { ScenarioPanel } from "./components/ScenarioPanel";
 import ganttService from "@/services/ganttService";
 import type { SensitivityReport } from "@/types/gantt";
+import { AddWorkgroupForm } from "./components/AddWorkgroupForm";
+
 
 type SimulationMode = "manual" | "sensitivity";
 
@@ -36,6 +38,7 @@ export function ProjectDetailPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"worksite" | "workgroup" | "timeline" | "budget">("worksite");
   const [drawerWg, setDrawerWg] = useState<UIWorkgroup | null>(null);
+  const [showAddWg, setShowAddWg] = useState(false);
 
   // ★ Multi-WG simulation state
   const [simulatingWgIds, setSimulatingWgIds] = useState<string[]>([]);
@@ -161,6 +164,23 @@ export function ProjectDetailPage() {
         <TabButton label="Timeline" icon={GanttI} isActive={activeTab === "timeline"} onClick={() => setActiveTab("timeline")} />
         <TabButton label="Budget & Expenses" icon={DollarI} isActive={activeTab === "budget"} onClick={() => setActiveTab("budget")} />
 
+        {(activeTab === "worksite" || activeTab === "workgroup") && (
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", paddingRight: 8 }}>
+            <button onClick={() => setShowAddWg(true)}
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                padding: "5px 14px", borderRadius: 7, fontSize: 12, fontWeight: 700,
+                border: "none", background: "linear-gradient(135deg,#3D6B5E,#5AAE8F)",
+                color: "#fff", cursor: "pointer", fontFamily: "'Outfit',sans-serif",
+                transition: "all .15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(1.1)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.filter = "brightness(1)"; }}>
+              + Add Workgroup
+            </button>
+          </div>
+        )}
+
         {/* ★ Gantt legend + action buttons */}
         {activeTab === "timeline" && <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12, paddingRight: 8 }}>
 
@@ -251,6 +271,15 @@ export function ProjectDetailPage() {
 
       {/* Drawer */}
       {drawerWg && <WorkgroupDrawer wg={drawerWg} allWg={d.allWg} onClose={() => setDrawerWg(null)} />}
+    
+      {showAddWg && projectId && (
+        <AddWorkgroupForm
+          projectId={projectId}
+          onClose={() => setShowAddWg(false)}
+          onCreated={() => { setShowAddWg(false); refresh(); setActiveTab("workgroup"); }}
+        />
+      )}
+    
     </div>
   );
 }

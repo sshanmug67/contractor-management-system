@@ -29,6 +29,7 @@ from app.db.interfaces import (
     IDashboardRepository,
     IAllocationRepository,
     IAuthRepository,
+    ILocationRepository,
 )
 
 
@@ -91,6 +92,11 @@ def get_auth_repo(
     providers: ProviderRegistry = Depends(get_providers),
 ) -> IAuthRepository:
     return providers.auth
+
+def get_location_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> ILocationRepository:
+    return providers.locations
 
 
 # ── Business Owner Auth (Supabase JWT) ────────────────────

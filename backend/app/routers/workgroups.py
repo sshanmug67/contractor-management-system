@@ -38,9 +38,8 @@ async def create_workgroup(
     # user=Depends(get_current_user),
     repo: IWorkgroupRepository = Depends(get_workgroup_repo),
 ):
-    """Create a new workgroup within a worksite."""
-    # TODO: repo.create(data)
-    pass
+    """Create a new workgroup. Requires project_id, optionally worksite_id."""
+    return await repo.create_workgroup(data)
 
 
 @router.get("/{workgroup_id}")

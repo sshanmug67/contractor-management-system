@@ -1,0 +1,3 @@
+Phase 4 (Edit Plan) is the remaining planned work — LocationPicker component, adding workgroups directly to projects from the UI, and the business location management CRUD. This is where the new model really shines since users can create workgroups without choosing a worksite first.
+Beyond that, there's the per-job worksite override — right now every job in the Workgroup table shows the same worksite (inherited from its workgroup). When you build the job editor with the LocationPicker, each job can point to a different site, and the table will show different worksites per row naturally.
+Have a good evening — see you tomorrow.

@@ -16,7 +16,7 @@ from app.db.interfaces.dashboard_repository import IDashboardRepository
 from app.db.interfaces.allocation_repository import IAllocationRepository
 from app.db.interfaces.auth_repository import IAuthRepository
 from app.db.interfaces.template_repository import ITemplateRepository
-
+from app.db.interfaces.location_repository import ILocationRepository
 
 __all__ = [
     "IProjectRepository",
@@ -30,4 +30,5 @@ __all__ = [
     "IAllocationRepository",
     "IAuthRepository",
     "ITemplateRepository",
+    "ILocationRepository",
 ]

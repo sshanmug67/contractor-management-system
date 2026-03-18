@@ -7,12 +7,14 @@ initialized here and accessed via a single registry instance.
 
 Changes from previous version:
   ✦ Added ITemplateRepository + SupabaseTemplateRepository for Template Library
+  ✦ Added ILocationRepository + LocationRepository for Phase 4 (Business Locations + GeoService)
 
 Usage:
     from app.providers import get_provider_registry
     registry = get_provider_registry()
     project = await registry.projects.get_project(id)
     templates = await registry.templates.list_templates(org_id)
+    locations = await registry.locations.list_locations(org_id)
 """
 
 from functools import lru_cache
@@ -32,6 +34,7 @@ from app.db.interfaces import (
     IAuthRepository,
 )
 from app.db.interfaces.template_repository import ITemplateRepository
+from app.db.interfaces.location_repository import ILocationRepository
 
 
 class ProviderRegistry:
@@ -50,6 +53,7 @@ class ProviderRegistry:
         registry.allocation  → IAllocationRepository
         registry.auth        → IAuthRepository
         registry.templates   → ITemplateRepository  ★ NEW
+        registry.locations   → ILocationRepository  ★ Phase 4
     """
 
     # ── Repository instances (set by provider init) ───────
@@ -64,6 +68,7 @@ class ProviderRegistry:
     allocation: IAllocationRepository
     auth: IAuthRepository
     templates: ITemplateRepository  # ★ NEW — Template Library
+    locations: ILocationRepository  # ★ Phase 4 — Business Locations
 
     # TODO Phase B: Add these when storage/auth/realtime abstraction is built
     # storage: IStorageProvider
@@ -105,6 +110,7 @@ class ProviderRegistry:
         from app.db.providers.supabase.allocation_queries import AllocationRepository
         from app.db.providers.supabase.auth_queries import AuthRepository
         from app.db.providers.supabase.template_queries import SupabaseTemplateRepository  # ★ NEW
+        from app.db.providers.supabase.location_queries import LocationRepository  # ★ Phase 4
 
         self.projects = ProjectRepository(client)
         self.worksites = WorksiteRepository(client)
@@ -117,6 +123,7 @@ class ProviderRegistry:
         self.allocation = AllocationRepository(client)
         self.auth = AuthRepository(client)
         self.templates = SupabaseTemplateRepository(client)  # ★ NEW — Template Library
+        self.locations = LocationRepository(client)  # ★ Phase 4 — Business Locations
 
     def _init_postgres(self, settings):
         """

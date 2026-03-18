@@ -28,6 +28,7 @@ from app.routers import (
     checkins,
     analytics,
     dashboard,
+    locations,
 )
 from app.auth import router as auth_router
 from app.routers import dependency_changes
@@ -82,6 +83,7 @@ app.include_router(uploads.router,          prefix="/api/uploads",     tags=["Up
 app.include_router(checkins.router,         prefix="/api/checkins",    tags=["Check-ins"])
 app.include_router(analytics.router,        prefix="/api/analytics",   tags=["Analytics"])
 app.include_router(dashboard.router,        prefix="/api/dashboard",   tags=["Dashboard"])
+app.include_router(locations.router,        prefix="/api/locations",   tags=["Locations"])
 app.include_router(dependency_changes.router)
 
 # ── Health Check ──────────────────────────────────────
@@ -111,6 +113,10 @@ async def on_startup():
         _log.info("  ✅ Claude API key ready (ends ...%s)", settings.claude_api_key[-6:])
     else:
         _log.warning("  ⚠️ CLAUDE_API_KEY not set — scaffold generation will fail!")
+    if settings.google_maps_api_key:
+        _log.info("  ✅ Google Maps API key ready — geocoding/verification enabled")
+    else:
+        _log.warning("  ⚠️ GOOGLE_MAPS_API_KEY not set — geocoding disabled (geofence still works)")
     _log.info("=" * 60)
 
 
