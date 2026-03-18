@@ -74,7 +74,8 @@ class WorkgroupNode(BaseModel):
     id: str
     title: str
     trade: str = ""
-    worksite_id: str = ""
+    worksite_id: Optional[str] = ""                     # ← v3: clarified Optional (empty when no site)
+    project_id: str = ""                                # ← v3: NEW — direct project reference
     status: str = ""
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -168,7 +169,8 @@ class GanttWorkgroup(BaseModel):
     """Workgroup with full display fields + dependency analysis annotations."""
     # Core fields (match DashboardWorkgroup in dashboard.ts)
     id: str
-    worksite_id: str
+    worksite_id: str = ""                               # ← v3: CRITICAL FIX — was required str, null from DB caused validation error
+    project_id: str = ""                                # ← v3: NEW — direct project reference
     title: str
     trade: Optional[str] = None
     contractor_id: Optional[str] = None

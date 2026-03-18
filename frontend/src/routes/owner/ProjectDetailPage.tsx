@@ -18,10 +18,11 @@ import { transformDashboardData } from "@/hooks/dashboardBridge";
 import type { UIWorkgroup } from "@/hooks/dashboardBridge";
 import { useGanttData } from "@/hooks/ganttBridge";
 
-import { P, css, CalI, ChevLI, BellI, GridI, GanttI, DollarI, TabButton, fmt } from "./components/projectConstants";
+import { P, css, CalI, ChevLI, BellI, GridI, GanttI, DollarI, MapPinI, TabButton, fmt } from "./components/projectConstants";
 import { GanttView } from "./components/GanttView";
 import { GanttOutlook } from "./components/GanttOutlook";
 import { CardView } from "./components/CardView";
+import { WorkgroupCardView } from "./components/WorkgroupCardView";
 import { ProjectOutlook } from "./components/ProjectOutlook";
 import { BudgetExpensesView } from "./components/BudgetExpensesView";
 import { WorkgroupDrawer } from "./components/WorkgroupDrawer";
@@ -33,7 +34,7 @@ type SimulationMode = "manual" | "sensitivity";
 
 export function ProjectDetailPage() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<"overview" | "timeline" | "budget">("overview");
+  const [activeTab, setActiveTab] = useState<"worksite" | "workgroup" | "timeline" | "budget">("worksite");
   const [drawerWg, setDrawerWg] = useState<UIWorkgroup | null>(null);
 
   // ★ Multi-WG simulation state
@@ -155,7 +156,8 @@ export function ProjectDetailPage() {
 
       {/* ── Tab Bar ── */}
       <div style={{ display: "flex", borderBottom: "1px solid #ECEAE6", background: "#fff", flexShrink: 0, padding: "0 16px" }}>
-        <TabButton label="Overview" icon={GridI} isActive={activeTab === "overview"} onClick={() => setActiveTab("overview")} />
+        <TabButton label="Worksite" icon={MapPinI} isActive={activeTab === "worksite"} onClick={() => setActiveTab("worksite")} />
+        <TabButton label="Workgroup" icon={GridI} isActive={activeTab === "workgroup"} onClick={() => setActiveTab("workgroup")} />
         <TabButton label="Timeline" icon={GanttI} isActive={activeTab === "timeline"} onClick={() => setActiveTab("timeline")} />
         <TabButton label="Budget & Expenses" icon={DollarI} isActive={activeTab === "budget"} onClick={() => setActiveTab("budget")} />
 
@@ -206,7 +208,8 @@ export function ProjectDetailPage() {
 
       {/* ── Tab Content ── */}
       <div style={{ flex: 1, display: "flex", minHeight: 0, background: "#F7F6F3" }}>
-        {activeTab === "overview" && <CardView onOpenDrawer={setDrawerWg} d={d} />}
+        {activeTab === "worksite" && <CardView onOpenDrawer={setDrawerWg} d={d} />}
+        {activeTab === "workgroup" && <WorkgroupCardView onOpenDrawer={setDrawerWg} d={d} />}
 
         {activeTab === "timeline" && (
           ganttData
@@ -231,8 +234,8 @@ export function ProjectDetailPage() {
 
         {activeTab === "budget" && <BudgetExpensesView d={d} />}
 
-        {/* Sidebars */}
-        {activeTab === "overview" && <ProjectOutlook d={d} sensitivity={sensitivityData} />}
+        {/* Sidebars — ProjectOutlook shows for both worksite and workgroup tabs */}
+        {(activeTab === "worksite" || activeTab === "workgroup") && <ProjectOutlook d={d} sensitivity={sensitivityData} />}
         {activeTab === "timeline" && ganttData && (
           showPanel
             ? <ScenarioPanel

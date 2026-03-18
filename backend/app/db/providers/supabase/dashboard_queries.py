@@ -4,6 +4,14 @@ Dashboard Queries — Implemented
 Fetches all data needed for the Owner Dashboard in minimal DB round-trips.
 Assembles the nested structure: Project → Worksites → Workgroups → Jobs.
 
+v3 MIGRATION CHANGES:
+  - get_owner_dashboard: queries workgroups by project_id (not worksite_ids).
+    Workgroups with null worksite_id grouped under virtual "Project Tasks" entry.
+  - get_project_graph: queries workgroups by project_id directly (4 queries, was 5).
+    Includes project_id in workgroup dicts. Tolerates null worksite_id.
+  - get_pending_invoices: scopes via workgroups→projects (not worksites→projects).
+  - get_pending_workgroups: same fix — direct project_id scoping.
+
 Also provides portfolio-level queries for the landing page:
   get_portfolio_projects, get_pending_invoices,
   get_pending_workgroups, get_recent_activity
@@ -86,12 +94,13 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
 
         worksite_ids = [ws["id"] for ws in worksites]
 
-        # ── 3. Get ALL workgroups across these worksites ──────
-        #    Join contractor name in one query
+        # ── 3. Get ALL workgroups for this project ───────────
+        #    v3: Query by project_id directly (no worksite indirection)
+        #    Includes workgroups with null worksite_id (project-level tasks)
         workgroups_result = (
             self.client.table("workgroups")
-            .select("*, contractors(company_name)")
-            .in_("worksite_id", worksite_ids)
+            .select("*, contractors(company_name, address_line1, city, state, zip_code, phone)")
+            .eq("project_id", project["id"])
             .order("title")
             .execute()
         )
@@ -195,13 +204,25 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
             wg_id = wg["id"]
             wg_jobs = jobs_by_wg.get(wg_id, [])
 
-            # Contractor name from joined data
+            # Contractor details from joined data
             contractor_info = wg.get("contractors")
             contractor_name = (
                 contractor_info.get("company_name", "Unassigned")
                 if contractor_info and isinstance(contractor_info, dict)
                 else "Unassigned"
             )
+            # v3: Build contractor address string from components
+            contractor_address = ""
+            contractor_phone = ""
+            if contractor_info and isinstance(contractor_info, dict):
+                addr_parts = [
+                    contractor_info.get("address_line1"),
+                    contractor_info.get("city"),
+                    contractor_info.get("state"),
+                    contractor_info.get("zip_code"),
+                ]
+                contractor_address = ", ".join(p for p in addr_parts if p) or ""
+                contractor_phone = contractor_info.get("phone") or ""
 
             # Invoice totals for this workgroup
             wg_invoices = inv_by_wg.get(wg_id, [])
@@ -252,11 +273,14 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
 
             wg_assembled[wg_id] = {
                 "id": wg_id,
-                "worksite_id": wg["worksite_id"],
+                "project_id": wg.get("project_id", project["id"]),  # v3: direct project ref
+                "worksite_id": wg.get("worksite_id") or "",         # v3: may be null
                 "title": wg["title"],
                 "trade": wg.get("trade"),
                 "contractor_id": wg.get("contractor_id"),
                 "contractor_name": contractor_name,
+                "contractorAddress": contractor_address,
+                "contractorPhone": contractor_phone,
                 "budget": float(wg.get("budget") or 0),
                 "start_date": wg.get("start_date"),
                 "end_date": wg.get("end_date"),
@@ -270,11 +294,14 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
 
         # Assemble worksites with nested workgroups (topologically sorted)
         assembled_worksites = []
+        assigned_wg_ids = set()  # v3: track which WGs got assigned to a worksite
+
         for ws in worksites:
             ws_wg_ids = [
                 wg["id"] for wg in all_workgroups
-                if wg["worksite_id"] == ws["id"] and wg["id"] in wg_assembled
+                if wg.get("worksite_id") == ws["id"] and wg["id"] in wg_assembled
             ]
+            assigned_wg_ids.update(ws_wg_ids)
             sorted_ids = self._topo_sort_workgroups(ws_wg_ids, deps_by_wg, wg_assembled)
             ws_wgs = [wg_assembled[wg_id] for wg_id in sorted_ids]
             assembled_worksites.append({
@@ -290,6 +317,29 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                 "status": ws.get("status", "draft"),
                 "progress_pct": float(ws.get("progress_pct") or 0),
                 "workgroups": ws_wgs,
+            })
+
+        # v3: Virtual worksite for project-level workgroups (no worksite_id)
+        unassigned_wg_ids = [
+            wg["id"] for wg in all_workgroups
+            if wg["id"] in wg_assembled and wg["id"] not in assigned_wg_ids
+        ]
+        if unassigned_wg_ids:
+            sorted_ids = self._topo_sort_workgroups(unassigned_wg_ids, deps_by_wg, wg_assembled)
+            project_wgs = [wg_assembled[wg_id] for wg_id in sorted_ids]
+            assembled_worksites.append({
+                "id": "project-level",
+                "name": "Project Tasks",
+                "address_line1": "",
+                "city": "",
+                "state": "",
+                "zip_code": "",
+                "budget": 0,
+                "start_date": None,
+                "end_date": None,
+                "status": "active",
+                "progress_pct": 0,
+                "workgroups": project_wgs,
             })
 
         total_budget = float(project.get("total_budget") or 0)
@@ -409,42 +459,24 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
         """
         Return the complete dependency graph for a project.
 
-        Makes 5 queries:
-          1. Worksites for this project (to get worksite IDs)
-          2. Workgroups across all worksites
-          3. Jobs across all workgroups
-          4. Workgroup dependencies
-          5. Job dependencies
+        v3: Queries workgroups by project_id directly (no worksite indirection).
+        Makes 4 queries:
+          1. Workgroups for this project (direct)
+          2. Jobs across all workgroups
+          3. Workgroup dependencies
+          4. Job dependencies
 
         Returns a dict that maps directly to ProjectGraph(**result).
         """
 
-        # ── 1. Get worksites for this project ────────────────
-        worksites_result = (
-            self.client.table("worksites")
-            .select("id")
-            .eq("project_id", project_id)
-            .execute()
-        )
-        worksite_ids = [ws["id"] for ws in (worksites_result.data or [])]
-
-        if not worksite_ids:
-            return {
-                "project_id": project_id,
-                "workgroups": [],
-                "jobs": [],
-                "wg_edges": [],
-                "job_edges": [],
-            }
-
-        # ── 2. Get workgroups across all worksites ───────────
+        # ── 1. Get workgroups for this project (direct) ──────
         wg_result = (
             self.client.table("workgroups")
             .select(
-                "id, title, trade, worksite_id, status, "
+                "id, title, trade, worksite_id, project_id, status, "
                 "start_date, end_date, budget, contractor_id"
             )
-            .in_("worksite_id", worksite_ids)
+            .eq("project_id", project_id)
             .execute()
         )
         all_workgroups = wg_result.data or []
@@ -511,7 +543,8 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                 "id": wg["id"],
                 "title": wg["title"],
                 "trade": wg.get("trade", ""),
-                "worksite_id": wg["worksite_id"],
+                "worksite_id": wg.get("worksite_id") or "",     # v3: may be null
+                "project_id": wg.get("project_id", project_id), # v3: direct ref
                 "status": wg["status"],
                 "start_date": wg.get("start_date"),
                 "end_date": wg.get("end_date"),
@@ -605,14 +638,9 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
         """
         Get invoices awaiting review across all projects for the org.
 
-        Joins through: invoices → contractors, invoices → workgroups → worksites → projects
-        Filters: status in (submitted, ai_validated, ai_flagged, pending_approval)
-        Scoping: RLS on projects table + explicit org_id check below.
-
-        FIX: Uses regular join on contractors (not !inner) so invoices
-        aren't excluded if the contractor FK is somehow null in edge cases.
-        The !inner remains on workgroups/worksites/projects because those
-        are required for org scoping.
+        v3: Scopes through workgroups → projects (via project_id) instead of
+        workgroups → worksites → projects. This handles workgroups with
+        null worksite_id correctly.
         """
         response = (
             self.client.table("invoices")
@@ -620,11 +648,9 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                 "id, invoice_number, amount, status, submitted_at, "
                 "contractor:contractors(company_name), "
                 "workgroup:workgroups!inner("
-                "  title, trade, "
-                "  worksite:worksites!inner("
-                "    name, "
-                "    project:projects!inner(title, org_id)"
-                "  )"
+                "  title, trade, worksite_id, "
+                "  worksite:worksites(name), "
+                "  project:projects!inner(title, org_id)"
                 ")"
             )
             .in_("status", [
@@ -639,11 +665,9 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
         for row in (response.data or []):
             contractor = row.get("contractor") or {}
             workgroup = row.get("workgroup") or {}
-            worksite = workgroup.get("worksite") or {}
-            project = worksite.get("project") or {}
+            worksite = workgroup.get("worksite") or {}  # v3: may be null
+            project = workgroup.get("project") or {}
 
-            # RLS handles org scoping on the projects table,
-            # but double-check in case RLS isn't applied to the view join
             if project.get("org_id") != org_id:
                 continue
 
@@ -655,7 +679,7 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                 "submitted_at": row.get("submitted_at"),
                 "contractor_name": contractor.get("company_name", ""),
                 "workgroup_title": workgroup.get("title", ""),
-                "worksite_name": worksite.get("name", ""),
+                "worksite_name": worksite.get("name", "") if worksite else "",
                 "project_title": project.get("title", ""),
                 "job_title": None,  # TODO: resolve from invoice.line_items
             })
@@ -666,18 +690,16 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
         """
         Get workgroups with status='pending' (awaiting contractor response).
 
-        Joins through: workgroups → contractors, workgroups → worksites → projects
-        Scoping: RLS + explicit org_id check.
+        v3: Scopes through project_id → projects instead of
+        worksites → projects. Handles null worksite_id.
         """
         response = (
             self.client.table("workgroups")
             .select(
-                "id, title, trade, status, "
+                "id, title, trade, status, worksite_id, "
                 "contractor:contractors(company_name), "
-                "worksite:worksites!inner("
-                "  name, "
-                "  project:projects!inner(org_id)"
-                ")"
+                "worksite:worksites(name), "
+                "project:projects!inner(org_id)"
             )
             .eq("status", "pending")
             .order("created_at", desc=True)
@@ -687,8 +709,8 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
         results = []
         for row in (response.data or []):
             contractor = row.get("contractor") or {}
-            worksite = row.get("worksite") or {}
-            project = worksite.get("project") or {}
+            worksite = row.get("worksite") or {}  # v3: may be null
+            project = row.get("project") or {}
 
             if project.get("org_id") != org_id:
                 continue
@@ -699,7 +721,7 @@ class DashboardRepository(SupabaseBaseRepository, IDashboardRepository):
                 "trade": row.get("trade", ""),
                 "status": row["status"],
                 "contractor_name": contractor.get("company_name", "Unassigned"),
-                "worksite_name": worksite.get("name", ""),
+                "worksite_name": worksite.get("name", "") if worksite else "",
             })
 
         return results

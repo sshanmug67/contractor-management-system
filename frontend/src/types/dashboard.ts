@@ -20,7 +20,8 @@ export interface DashboardJob {
 
 export interface DashboardWorkgroup {
   id: string;
-  worksite_id: string;
+  project_id: string;                    // v3: direct project reference
+  worksite_id: string;                   // v3: may be "" for project-level WGs
   title: string;
   trade?: string;
   contractor_id?: string;

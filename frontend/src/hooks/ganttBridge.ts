@@ -64,6 +64,7 @@ export interface UIGanttJob {
 
 export interface UIGanttWorkgroup {
   id: string;
+  projectId: string;             // v3: direct project reference
   worksiteId: string;
   title: string;
   trade: string;
@@ -194,7 +195,8 @@ function transformWorkgroup(wg: GanttWorkgroup): UIGanttWorkgroup {
 
   return {
     id: wg.id,
-    worksiteId: wg.worksite_id,
+    projectId: wg.project_id || '',      // v3
+    worksiteId: wg.worksite_id || '',    // v3: may be "" for project-level WGs
     title: wg.title,
     trade: wg.trade || wg.title,
     contractorId: wg.contractor_id,

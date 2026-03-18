@@ -7,6 +7,10 @@ Handles:
 - Allocation (assign contractor, generate QR)
 - Accept/reject flow
 - Dependency management
+
+v3 MIGRATION CHANGES:
+  - Added: list_by_project() — primary query pattern (direct project_id, no worksite join)
+  - Fixed: GET_WORKGROUP_DETAIL — JOIN worksites changed to LEFT JOIN for null worksite_id
 """
 
 from typing import Optional
@@ -50,7 +54,7 @@ GET_WORKGROUP_DETAIL = """
          WHERE workgroup_id = wg.id) AS unique_workers
 
     FROM workgroups wg
-    JOIN worksites ws ON wg.worksite_id = ws.id
+    LEFT JOIN worksites ws ON wg.worksite_id = ws.id
     LEFT JOIN contractors c ON wg.contractor_id = c.id
     WHERE wg.id = :workgroup_id;
 """
@@ -118,6 +122,30 @@ class WorkgroupRepository(SupabaseBaseRepository, IWorkgroupRepository):
             query = query.eq("status", status)
 
         query = query.order("start_date")
+        result = query.execute()
+        return result.data or []
+
+    async def list_by_project(
+        self,
+        project_id: str,
+        status: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> list[dict]:
+        """
+        v3 NEW — Primary query pattern.
+        List all workgroups for a project (direct, no worksite join).
+        """
+        query = (
+            self.client.table(self.TABLE)
+            .select("*, contractors(company_name)")
+            .eq("project_id", project_id)
+        )
+
+        if status:
+            query = query.eq("status", status)
+
+        query = query.order("start_date").range(skip, skip + limit - 1)
         result = query.execute()
         return result.data or []
 

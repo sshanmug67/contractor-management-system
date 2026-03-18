@@ -1,8 +1,13 @@
 """
 Pydantic Models — Workgroup
 
-Assigned to one Contractor Company at one Worksite.
-Contains one or more Jobs.
+A contractor contract unit within a Project.
+Contains one or more Jobs. Optionally assigned to a Worksite.
+
+v3 MIGRATION CHANGES:
+  - WorkgroupCreate: added project_id (required), worksite_id now Optional
+  - WorkgroupResponse: added project_id, worksite_id now Optional
+  - WorkgroupDetail: inherits changes from WorkgroupResponse (automatic)
 """
 
 from pydantic import BaseModel, Field
@@ -27,7 +32,8 @@ class WorkgroupStatus(str, Enum):
 # ── Request Models ────────────────────────────────────
 
 class WorkgroupCreate(BaseModel):
-    worksite_id: str
+    project_id: str                                     # ← v3: NEW (required)
+    worksite_id: Optional[str] = None                   # ← v3: was required str
     title: str
     trade: Optional[str] = None
     budget: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
@@ -41,6 +47,7 @@ class WorkgroupUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     status: Optional[WorkgroupStatus] = None
+    worksite_id: Optional[str] = None                   # ← v3: allow changing worksite
 
 class WorkgroupAllocate(BaseModel):
     """Allocate a contractor to this workgroup."""
@@ -60,7 +67,8 @@ class WorkgroupDependencyCreate(BaseModel):
 
 class WorkgroupResponse(BaseModel):
     id: str
-    worksite_id: str
+    project_id: str                                     # ← v3: NEW
+    worksite_id: Optional[str] = None                   # ← v3: was required str
     contractor_id: Optional[str] = None
     title: str
     trade: Optional[str] = None

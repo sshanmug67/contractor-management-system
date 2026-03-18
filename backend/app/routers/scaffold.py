@@ -192,6 +192,7 @@ async def create_from_scaffold(
         wg_budget = round(total_budget * wg.budget_pct, 2) if total_budget > 0 else None
  
         wg_data = {
+            "project_id": project_id,                    # v3: direct project reference
             "worksite_id": worksite_ids[ws_idx],
             "title": wg.title,
             "trade": wg.trade,

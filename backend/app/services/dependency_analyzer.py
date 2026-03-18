@@ -491,9 +491,13 @@ class DependencyService:
                         return errors
 
                 # Cross-site check
+                # v3: Skip when either workgroup has no worksite (project-level WG).
+                # Only enforce when BOTH workgroups are assigned to specific sites.
                 from_wg = working.get_workgroup(from_id)
                 to_wg = working.get_workgroup(to_id)
-                if from_wg and to_wg and from_wg.worksite_id != to_wg.worksite_id:
+                if (from_wg and to_wg
+                        and from_wg.worksite_id and to_wg.worksite_id
+                        and from_wg.worksite_id != to_wg.worksite_id):
                     errors.append(ValidationError(
                         code="CROSS_SITE", change_index=index,
                         message="Workgroups on different worksites cannot depend on each other.",

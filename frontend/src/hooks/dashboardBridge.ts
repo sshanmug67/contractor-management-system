@@ -32,9 +32,13 @@ export interface UIJob {
 
 export interface UIWorkgroup {
   id: string;
+  projectId: string;             // v3: direct project reference
+  worksiteId: string;            // v3: may be "" for project-level WGs
   title: string;
   trade: string;
   contractor: string;
+  contractorAddress: string;
+  contractorPhone: string;
   status: string;
   startDate: string;
   endDate: string;
@@ -100,9 +104,13 @@ function transformJob(job: DashboardJob): UIJob {
 function transformWorkgroup(wg: DashboardWorkgroup): UIWorkgroup {
   return {
     id: wg.id,
+    projectId: wg.project_id || '',      // v3
+    worksiteId: wg.worksite_id || '',    // v3: may be "" for project-level WGs
     title: wg.title,
     trade: wg.trade || wg.title,
     contractor: wg.contractor_name || 'Unassigned',
+    contractorAddress: (wg as any).contractorAddress || '',
+    contractorPhone: (wg as any).contractorPhone || '',
     status: wg.status,
     startDate: wg.start_date || '',
     endDate: wg.end_date || '',

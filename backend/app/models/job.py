@@ -3,6 +3,10 @@ Pydantic Models — Job
 
 A single discrete task within a Workgroup.
 Has checklists, uploads, and can be referenced by invoices.
+
+v3 MIGRATION CHANGES:
+  - JobCreate: added optional worksite_id (per-job location override)
+  - JobResponse: added optional worksite_id
 """
 
 from pydantic import BaseModel, Field
@@ -29,6 +33,7 @@ class JobCreate(BaseModel):
     budget: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
     est_duration_days: Optional[int] = Field(None, ge=0)
     sequence: int = 1
+    worksite_id: Optional[str] = None                   # ← v3: NEW — per-job location override
 
 class JobUpdate(BaseModel):
     title: Optional[str] = None
@@ -37,6 +42,7 @@ class JobUpdate(BaseModel):
     est_duration_days: Optional[int] = None
     sequence: Optional[int] = None
     status: Optional[JobStatus] = None
+    worksite_id: Optional[str] = None                   # ← v3: NEW — allow changing job location
 
 class JobDependencyCreate(BaseModel):
     depends_on_job_id: str
@@ -60,6 +66,7 @@ class JobResponse(BaseModel):
     sequence: int
     status: JobStatus
     invoice_id: Optional[str] = None
+    worksite_id: Optional[str] = None                   # ← v3: NEW — resolved per-job location
     created_at: datetime
     updated_at: datetime
 

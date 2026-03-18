@@ -15,6 +15,7 @@ docker start cms_redis_dev
 
 # to clear the cache:
 docker exec cms_redis_dev redis-cli FLUSHDB
+redis-cli -p 6380 KEYS "cms:cache:*" | xargs redis-cli -p 6380 DEL
 
 # to check the redis server running.
 docker exec cms_redis_dev redis-cli ping
