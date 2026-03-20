@@ -30,6 +30,7 @@ from app.db.interfaces import (
     IAllocationRepository,
     IAuthRepository,
     ILocationRepository,
+    IBusinessProfileRepository,
 )
 
 
@@ -98,7 +99,11 @@ def get_location_repo(
 ) -> ILocationRepository:
     return providers.locations
 
-
+def get_business_profile_repo(
+    providers: ProviderRegistry = Depends(get_providers),
+) -> IBusinessProfileRepository:
+    return providers.business_profiles
+    
 # ── Business Owner Auth (Supabase JWT) ────────────────────
 
 async def get_current_user(

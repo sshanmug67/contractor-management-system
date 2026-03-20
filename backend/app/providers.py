@@ -35,7 +35,7 @@ from app.db.interfaces import (
 )
 from app.db.interfaces.template_repository import ITemplateRepository
 from app.db.interfaces.location_repository import ILocationRepository
-
+from app.db.interfaces.business_profile_repository import IBusinessProfileRepository
 
 class ProviderRegistry:
     """
@@ -111,6 +111,7 @@ class ProviderRegistry:
         from app.db.providers.supabase.auth_queries import AuthRepository
         from app.db.providers.supabase.template_queries import SupabaseTemplateRepository  # ★ NEW
         from app.db.providers.supabase.location_queries import LocationRepository  # ★ Phase 4
+        from app.db.providers.supabase.business_profile_queries import BusinessProfileRepository
 
         self.projects = ProjectRepository(client)
         self.worksites = WorksiteRepository(client)
@@ -124,7 +125,8 @@ class ProviderRegistry:
         self.auth = AuthRepository(client)
         self.templates = SupabaseTemplateRepository(client)  # ★ NEW — Template Library
         self.locations = LocationRepository(client)  # ★ Phase 4 — Business Locations
-
+        self.business_profiles = BusinessProfileRepository(client)
+        
     def _init_postgres(self, settings):
         """
         Wire up self-hosted PostgreSQL provider implementations.

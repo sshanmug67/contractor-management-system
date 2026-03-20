@@ -1,0 +1,101 @@
+table_name,column_name,data_type,udt_name,character_maximum_length,numeric_precision,numeric_scale,is_nullable,column_default,constraint_type,references_table
+jobs,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+jobs,workgroup_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,workgroups
+jobs,title,text,text,null,null,null,NO,null,null,null
+jobs,description,text,text,null,null,null,YES,null,null,null
+jobs,budget,numeric,numeric,null,12,2,YES,null,null,null
+jobs,est_duration_days,integer,int4,null,32,0,YES,null,null,null
+jobs,sequence,integer,int4,null,32,0,YES,1,null,null
+jobs,status,text,text,null,null,null,YES,'not_started'::text,null,null
+jobs,invoice_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,invoices
+jobs,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+jobs,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+jobs,worksite_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,worksites
+messages,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+messages,workgroup_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,workgroups
+messages,sender_id,uuid,uuid,null,null,null,NO,null,null,null
+messages,sender_type,text,text,null,null,null,NO,null,null,null
+messages,worker_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,contractor_workers
+messages,content,text,text,null,null,null,YES,null,null,null
+messages,message_type,text,text,null,null,null,YES,'text'::text,null,null
+messages,ai_summary,text,text,null,null,null,YES,null,null,null
+messages,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+organizations,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+organizations,name,text,text,null,null,null,NO,null,null,null
+organizations,template,text,text,null,null,null,YES,'general_contracting'::text,null,null
+organizations,settings,jsonb,jsonb,null,null,null,YES,'{}'::jsonb,null,null
+organizations,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+organizations,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+project_templates,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+project_templates,org_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,organizations
+project_templates,name,text,text,null,null,null,NO,null,null,null
+project_templates,description,text,text,null,null,null,YES,null,null,null
+project_templates,industry,text,text,null,null,null,YES,null,null,null
+project_templates,project_subtype,text,text,null,null,null,YES,null,null,null
+project_templates,project_type_default,text,text,null,null,null,YES,'direct'::text,null,null
+project_templates,scaffold_data,jsonb,jsonb,null,null,null,NO,null,null,null
+project_templates,default_settings,jsonb,jsonb,null,null,null,YES,null,null,null
+project_templates,is_system,boolean,bool,null,null,null,YES,false,null,null
+project_templates,version,integer,int4,null,32,0,NO,1,null,null
+project_templates,usage_count,integer,int4,null,32,0,NO,0,null,null
+project_templates,created_by,uuid,uuid,null,null,null,YES,null,null,null
+project_templates,source,text,text,null,null,null,YES,'manual'::text,null,null
+project_templates,source_project_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,projects
+project_templates,tags,ARRAY,_text,null,null,null,YES,'{}'::text[],null,null
+project_templates,is_archived,boolean,bool,null,null,null,YES,false,null,null
+project_templates,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+project_templates,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+projects,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+projects,org_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,organizations
+projects,title,text,text,null,null,null,NO,null,null,null
+projects,description,text,text,null,null,null,YES,null,null,null
+projects,total_budget,numeric,numeric,null,12,2,YES,null,null,null
+projects,start_date,date,date,null,null,null,YES,null,null,null
+projects,end_date,date,date,null,null,null,YES,null,null,null
+projects,status,text,text,null,null,null,YES,'draft'::text,null,null
+projects,progress_pct,numeric,numeric,null,5,2,YES,0,null,null
+projects,created_by,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,user_profiles
+projects,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+projects,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+projects,project_type,text,text,null,null,null,YES,'direct'::text,null,null
+projects,industry,text,text,null,null,null,YES,null,null,null
+projects,project_subtype,text,text,null,null,null,YES,null,null,null
+projects,contractor_payment_terms,integer,int4,null,32,0,YES,15,null,null
+projects,client_payment_terms,integer,int4,null,32,0,YES,null,null,null
+projects,client_name,text,text,null,null,null,YES,null,null,null
+projects,contract_value,numeric,numeric,null,12,2,YES,null,null,null
+projects,retainage_pct,numeric,numeric,null,5,4,YES,0,null,null
+projects,retainage_release,text,text,null,null,null,YES,'substantial_completion'::text,null,null
+projects,sub_retainage_pct,numeric,numeric,null,5,4,YES,0,null,null
+projects,draw_frequency,text,text,null,null,null,YES,'monthly'::text,null,null
+projects,template_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,project_templates
+projects,scaffold_prompt,text,text,null,null,null,YES,null,null,null
+projects,scaffold_metadata,jsonb,jsonb,null,null,null,YES,null,null,null
+qr_tokens,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+qr_tokens,workgroup_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,workgroups
+qr_tokens,contractor_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,contractors
+qr_tokens,token,text,text,null,null,null,NO,null,UNIQUE,null
+qr_tokens,is_active,boolean,bool,null,null,null,YES,true,null,null
+qr_tokens,expires_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+qr_tokens,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+site_checkins,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+site_checkins,workgroup_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,workgroups
+site_checkins,worksite_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,worksites
+site_checkins,worker_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,contractor_workers
+site_checkins,geo_latitude,numeric,numeric,null,10,7,NO,null,null,null
+site_checkins,geo_longitude,numeric,numeric,null,10,7,NO,null,null,null
+site_checkins,distance_from_site_m,numeric,numeric,null,8,2,YES,null,null,null
+site_checkins,within_geo_fence,boolean,bool,null,null,null,NO,null,null,null
+site_checkins,device_info,jsonb,jsonb,null,null,null,YES,null,null,null
+site_checkins,checked_in_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+site_checkins,checked_out_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+site_checkins,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+uploads,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+uploads,workgroup_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,workgroups
+uploads,job_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,jobs
+uploads,uploaded_by,uuid,uuid,null,null,null,NO,null,null,null
+uploads,worker_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,contractor_workers
+uploads,file_url,text,text,null,null,null,NO,null,null,null
+uploads,file_type,text,text,null,null,null,YES,null,null,null
+uploads,ai_analysis,jsonb,jsonb,null,null,null,YES,null,null,null
+uploads,geo_latitude,numeric,numeric,null,10,7,YES,null,null,null

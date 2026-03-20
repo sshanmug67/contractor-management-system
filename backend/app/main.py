@@ -34,6 +34,8 @@ from app.auth import router as auth_router
 from app.routers import dependency_changes
 from app.routers import scaffold as scaffold_router_mod    # ★ NEW
 from app.routers import templates as templates_router_mod  # ★ NEW
+from app.routers import settings as settings_router_mod
+
 
 import logging
 _log = logging.getLogger("app.main")
@@ -85,6 +87,7 @@ app.include_router(analytics.router,        prefix="/api/analytics",   tags=["An
 app.include_router(dashboard.router,        prefix="/api/dashboard",   tags=["Dashboard"])
 app.include_router(locations.router,        prefix="/api/locations",   tags=["Locations"])
 app.include_router(dependency_changes.router)
+app.include_router(settings_router_mod.router)
 
 # ── Health Check ──────────────────────────────────────
 @app.get("/api/health", tags=["System"])

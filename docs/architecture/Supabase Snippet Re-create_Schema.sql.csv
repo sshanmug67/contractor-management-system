@@ -1,0 +1,101 @@
+table_name,column_name,data_type,udt_name,character_maximum_length,numeric_precision,numeric_scale,is_nullable,column_default,constraint_type,references_table
+audit_logs,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+audit_logs,entity_type,text,text,null,null,null,NO,null,null,null
+audit_logs,entity_id,uuid,uuid,null,null,null,NO,null,null,null
+audit_logs,action,text,text,null,null,null,NO,null,null,null
+audit_logs,actor_id,uuid,uuid,null,null,null,YES,null,null,null
+audit_logs,actor_type,text,text,null,null,null,YES,null,null,null
+audit_logs,changes,jsonb,jsonb,null,null,null,YES,null,null,null
+audit_logs,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+business_employees,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+business_employees,org_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,organizations
+business_employees,first_name,text,text,null,null,null,NO,null,null,null
+business_employees,last_name,text,text,null,null,null,NO,null,null,null
+business_employees,email,text,text,null,null,null,YES,null,null,null
+business_employees,phone,text,text,null,null,null,YES,null,null,null
+business_employees,role,text,text,null,null,null,YES,null,null,null
+business_employees,is_active,boolean,bool,null,null,null,YES,true,null,null
+business_employees,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+business_employees,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+business_locations,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+business_locations,org_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,organizations
+business_locations,name,text,text,null,null,null,NO,null,null,null
+business_locations,location_type,text,text,null,null,null,YES,'office'::text,null,null
+business_locations,address_line1,text,text,null,null,null,YES,null,null,null
+business_locations,address_line2,text,text,null,null,null,YES,null,null,null
+business_locations,city,text,text,null,null,null,YES,null,null,null
+business_locations,state,text,text,null,null,null,YES,null,null,null
+business_locations,zip_code,text,text,null,null,null,YES,null,null,null
+business_locations,phone,text,text,null,null,null,YES,null,null,null
+business_locations,geo_latitude,numeric,numeric,null,10,7,YES,null,null,null
+business_locations,geo_longitude,numeric,numeric,null,10,7,YES,null,null,null
+business_locations,geo_fence_radius_m,integer,int4,null,32,0,YES,200,null,null
+business_locations,is_default,boolean,bool,null,null,null,YES,false,null,null
+business_locations,is_active,boolean,bool,null,null,null,YES,true,null,null
+business_locations,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+business_locations,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+business_locations,google_place_id,text,text,null,null,null,YES,null,null,null
+business_locations,verification_status,text,text,null,null,null,YES,'unverified'::text,null,null
+checklists,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+checklists,job_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,jobs
+checklists,items,jsonb,jsonb,null,null,null,YES,'[]'::jsonb,null,null
+checklists,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+checklists,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+contractor_verifications,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+contractor_verifications,contractor_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,contractors
+contractor_verifications,verification_type,text,text,null,null,null,NO,null,null,null
+contractor_verifications,status,text,text,null,null,null,YES,'pending'::text,null,null
+contractor_verifications,source_url,text,text,null,null,null,YES,null,null,null
+contractor_verifications,details,jsonb,jsonb,null,null,null,YES,null,null,null
+contractor_verifications,verified_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+contractor_verifications,expires_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+contractor_verifications,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+contractor_workers,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+contractor_workers,contractor_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,contractors
+contractor_workers,first_name,text,text,null,null,null,NO,null,null,null
+contractor_workers,last_name,text,text,null,null,null,NO,null,null,null
+contractor_workers,phone,text,text,null,null,null,NO,null,null,null
+contractor_workers,email,text,text,null,null,null,YES,null,null,null
+contractor_workers,first_seen_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+contractor_workers,last_active_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+contractor_workers,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+contractor_workers,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+contractors,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+contractors,org_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,organizations
+contractors,company_name,text,text,null,null,null,NO,null,null,null
+contractors,owner_name,text,text,null,null,null,YES,null,null,null
+contractors,address_line1,text,text,null,null,null,YES,null,null,null
+contractors,address_line2,text,text,null,null,null,YES,null,null,null
+contractors,city,text,text,null,null,null,YES,null,null,null
+contractors,state,text,text,null,null,null,YES,null,null,null
+contractors,zip_code,text,text,null,null,null,YES,null,null,null
+contractors,email,text,text,null,null,null,NO,null,null,null
+contractors,phone,text,text,null,null,null,NO,null,null,null
+contractors,license_number,text,text,null,null,null,YES,null,null,null
+contractors,insurance_info,jsonb,jsonb,null,null,null,YES,'{}'::jsonb,null,null
+contractors,skills,ARRAY,_text,null,null,null,YES,'{}'::text[],null,null
+contractors,rating,numeric,numeric,null,3,2,YES,0,null,null
+contractors,performance,jsonb,jsonb,null,null,null,YES,'{}'::jsonb,null,null
+contractors,verification_status,text,text,null,null,null,YES,'pending'::text,null,null
+contractors,last_verified_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+contractors,is_active,boolean,bool,null,null,null,YES,true,null,null
+contractors,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+contractors,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+invoices,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+invoices,workgroup_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,workgroups
+invoices,contractor_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,contractors
+invoices,submitted_by_worker,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,contractor_workers
+invoices,invoice_number,text,text,null,null,null,NO,null,null,null
+invoices,amount,numeric,numeric,null,12,2,NO,null,null,null
+invoices,line_items,jsonb,jsonb,null,null,null,NO,'[]'::jsonb,null,null
+invoices,status,text,text,null,null,null,YES,'draft'::text,null,null
+invoices,ai_validated,boolean,bool,null,null,null,YES,false,null,null
+invoices,ai_flags,jsonb,jsonb,null,null,null,YES,'[]'::jsonb,null,null
+invoices,approved_by,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,user_profiles
+invoices,approved_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+invoices,file_url,text,text,null,null,null,YES,null,null,null
+invoices,submitted_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+invoices,paid_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+invoices,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+invoices,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+job_dependencies,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null

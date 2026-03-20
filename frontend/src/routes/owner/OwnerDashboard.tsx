@@ -1,6 +1,8 @@
-import { useState, useEffect, type SVGProps, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { useDashboardPortfolio, type UIProject, type UIPendingInvoice, type UIInsight, type UIActivity, type UIStats } from "@/hooks/useDashboardPortfolio";
+import { useDashboardPortfolio, type UIProject, type UIPendingInvoice, type UIActivity, type UIStats } from "@/hooks/useDashboardPortfolio";
+import { OnboardingBanner } from '../../components/OnboardingBanner';
+
 
 /* ═══════════════════════════════════════════════════════════════
    OWNER DASHBOARD — Redesigned
@@ -141,7 +143,7 @@ function bridgeProject(proj: UIProject, pendingInvoices: UIPendingInvoice[]): Pr
   // BRIDGE: Map existing fields to new shape.
   // Replace this entire function once API provides the new fields directly.
   const projectInvoices = pendingInvoices
-    .filter(inv => inv.projectTitle === proj.title || inv.projectId === proj.id)
+    .filter(inv => inv.projectTitle === proj.title)
     .map(inv => ({ contractor: inv.contractorName, amount: inv.amount }));
 
   return {
@@ -267,6 +269,8 @@ function ProjectCard({ proj, isHovered, onHover, onLeave, onClick, delay }: {
               <span style={{ fontSize: 9, fontWeight: 700, color: "#9C8E7C", textTransform: "uppercase", letterSpacing: "0.06em" }}>Budget</span>
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, fontWeight: 800, color: "#1A1814", lineHeight: 1 }}>{fmt(proj.contractValue)}</span>
             </Donut>
+
+            
 
             {/* Stats pills */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
@@ -601,7 +605,9 @@ export function OwnerDashboard() {
           ))}
         </div>
       </div>
-
+      
+      <OnboardingBanner />
+      
       {/* ═══════ BODY: Projects + Right Sidebar ═══════ */}
       <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
 
@@ -786,7 +792,7 @@ export function OwnerDashboard() {
                 { v: kpis.delayed + kpis.critical, l: "Delayed", color: "#D44A2E", bg: "#FEF0ED", border: "#F5C5BA" },
                 { v: kpis.projectsAtRisk, l: "At Risk", color: "#D44A2E", bg: "#FEF0ED", border: "#F5C5BA" },
                 { v: projects.reduce((a, p) => a + p.openIssues, 0), l: "Open Issues", color: "#7B5EA7", bg: "#F8F4FC", border: "#E0D4F0" },
-              ].map((item, i) => (
+              ].map((item) => (
                 <div key={item.l} style={{ padding: "10px 6px", borderRadius: 10, textAlign: "center", background: item.bg, border: `1px solid ${item.border}`, cursor: "pointer" }}>
                   <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 21, fontWeight: 800, color: item.color, lineHeight: 1 }}>{item.v}</p>
                   <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: item.color, opacity: 0.65, marginTop: 2 }}>{item.l}</p>

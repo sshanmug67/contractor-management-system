@@ -21,6 +21,8 @@ import { JobDetailPage } from './routes/contractor/JobDetailPage';
 import { InvoicesPage as ContractorInvoicesPage } from './routes/contractor/InvoicesPage';
 import { MessagesPage as ContractorMessagesPage } from './routes/contractor/MessagesPage';
 import { ProfilePage } from './routes/contractor/ProfilePage';
+import { OnboardingGate } from './routes/owner/OnboardingGate';
+
 
 function App() {
   return (
@@ -30,7 +32,9 @@ function App() {
         path="/dashboard"
         element={
           <ProtectedRoute role="owner">
-            <OwnerLayout />
+            <OnboardingGate>
+              <OwnerLayout />
+            </OnboardingGate>
           </ProtectedRoute>
         }
       >

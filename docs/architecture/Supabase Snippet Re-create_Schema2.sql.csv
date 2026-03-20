@@ -1,0 +1,61 @@
+table_name,column_name,data_type,udt_name,character_maximum_length,numeric_precision,numeric_scale,is_nullable,column_default,constraint_type,references_table
+user_profiles,id,uuid,uuid,null,null,null,NO,null,PRIMARY KEY,null
+user_profiles,id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,null
+user_profiles,org_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,organizations
+user_profiles,email,text,text,null,null,null,NO,null,null,null
+user_profiles,first_name,text,text,null,null,null,YES,null,null,null
+user_profiles,last_name,text,text,null,null,null,YES,null,null,null
+user_profiles,phone,text,text,null,null,null,YES,null,null,null
+user_profiles,role,text,text,null,null,null,NO,null,null,null
+user_profiles,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+user_profiles,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+workgroup_dependencies,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+workgroup_dependencies,workgroup_id,uuid,uuid,null,null,null,NO,null,UNIQUE,null
+workgroup_dependencies,workgroup_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,workgroups
+workgroup_dependencies,depends_on_workgroup_id,uuid,uuid,null,null,null,NO,null,UNIQUE,null
+workgroup_dependencies,depends_on_workgroup_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,workgroups
+workgroup_dependencies,dependency_type,text,text,null,null,null,YES,'finish_to_start'::text,null,null
+workgroup_dependencies,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+workgroups,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+workgroups,worksite_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,worksites
+workgroups,contractor_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,contractors
+workgroups,title,text,text,null,null,null,NO,null,null,null
+workgroups,trade,text,text,null,null,null,YES,null,null,null
+workgroups,budget,numeric,numeric,null,12,2,YES,null,null,null
+workgroups,start_date,date,date,null,null,null,YES,null,null,null
+workgroups,end_date,date,date,null,null,null,YES,null,null,null
+workgroups,status,text,text,null,null,null,YES,'draft'::text,null,null
+workgroups,progress_pct,numeric,numeric,null,5,2,YES,0,null,null
+workgroups,accepted_by,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,contractor_workers
+workgroups,accepted_at,timestamp with time zone,timestamptz,null,null,null,YES,null,null,null
+workgroups,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+workgroups,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+workgroups,project_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,projects
+worksite_contacts,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+worksite_contacts,worksite_id,uuid,uuid,null,null,null,NO,null,UNIQUE,null
+worksite_contacts,worksite_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,worksites
+worksite_contacts,employee_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,business_employees
+worksite_contacts,employee_id,uuid,uuid,null,null,null,NO,null,UNIQUE,null
+worksite_contacts,contact_role,text,text,null,null,null,NO,null,null,null
+worksite_contacts,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+worksites,id,uuid,uuid,null,null,null,NO,uuid_generate_v4(),PRIMARY KEY,null
+worksites,project_id,uuid,uuid,null,null,null,NO,null,FOREIGN KEY,projects
+worksites,name,text,text,null,null,null,NO,null,null,null
+worksites,address_line1,text,text,null,null,null,NO,null,null,null
+worksites,address_line2,text,text,null,null,null,YES,null,null,null
+worksites,city,text,text,null,null,null,NO,null,null,null
+worksites,state,text,text,null,null,null,NO,null,null,null
+worksites,zip_code,text,text,null,null,null,NO,null,null,null
+worksites,phone,text,text,null,null,null,YES,null,null,null
+worksites,site_notes,text,text,null,null,null,YES,null,null,null
+worksites,geo_latitude,numeric,numeric,null,10,7,YES,null,null,null
+worksites,geo_longitude,numeric,numeric,null,10,7,YES,null,null,null
+worksites,geo_fence_radius_m,integer,int4,null,32,0,YES,200,null,null
+worksites,budget,numeric,numeric,null,12,2,YES,null,null,null
+worksites,start_date,date,date,null,null,null,YES,null,null,null
+worksites,end_date,date,date,null,null,null,YES,null,null,null
+worksites,status,text,text,null,null,null,YES,'draft'::text,null,null
+worksites,progress_pct,numeric,numeric,null,5,2,YES,0,null,null
+worksites,created_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+worksites,updated_at,timestamp with time zone,timestamptz,null,null,null,YES,now(),null,null
+worksites,business_location_id,uuid,uuid,null,null,null,YES,null,FOREIGN KEY,business_locations

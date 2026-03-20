@@ -14,7 +14,7 @@ import { MapPinI, CheckI, XI, AlertCI } from "./projectConstants";
 import type { BusinessLocation, AddressVerification, CreateLocationRequest, LocationType } from "@/types/location";
 import { LOCATION_TYPE_LABELS, formatLocationAddress } from "@/types/location";
 import locationService from "@/services/locationService";
-import { useGooglePlaces, type PlaceSuggestion, type PlaceDetails } from "@/hooks/useGooglePlaces";
+import { useGooglePlaces, type PlaceSuggestion} from "@/hooks/useGooglePlaces";
 
 /* ═══════════════════ PROPS ═══════════════════ */
 
