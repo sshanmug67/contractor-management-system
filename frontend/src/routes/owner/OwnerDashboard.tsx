@@ -2,7 +2,7 @@ import { useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDashboardPortfolio, type UIProject, type UIPendingInvoice, type UIActivity, type UIStats } from "@/hooks/useDashboardPortfolio";
 import { OnboardingBanner } from '../../components/OnboardingBanner';
-
+import { useAuthStore } from '@/store/authStore';
 
 /* ═══════════════════════════════════════════════════════════════
    OWNER DASHBOARD — Redesigned
@@ -469,6 +469,7 @@ function ProjectCard({ proj, isHovered, onHover, onLeave, onClick, delay }: {
 /* ═══════════════════ MAIN DASHBOARD ═══════════════════ */
 export function OwnerDashboard() {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
   const [ready, setReady] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
   const [time, setTime] = useState(new Date());
@@ -552,7 +553,7 @@ export function OwnerDashboard() {
       <header style={{ padding: "14px 24px 10px", flexShrink: 0, background: "#fff", borderBottom: "1px solid #ECEAE6" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <h1 style={{ fontSize: 21, fontWeight: 800, color: "#1A1814", letterSpacing: "-0.02em" }}>{greeting}, Tom</h1>
+            <h1 style={{ fontSize: 21, fontWeight: 800, color: "#1A1814", letterSpacing: "-0.02em" }}>{greeting}, {user?.name?.split(' ')[0] || 'Tom'}</h1>
             <p style={{ fontSize: 15, color: "#8C7E6A", fontWeight: 500, marginTop: 1 }}>
               {time.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} · {rawProjects.filter(p => p.status === "active").length} active projects
             </p>

@@ -12,7 +12,9 @@ Pattern mirrors CVE Intel's realworld_stats_worker.
 
 Trigger: Celery Beat schedule (every 300s, configurable via CMS_BEAT_DASHBOARD)
 Cache key: cms:cache:dashboard_stats:{org_id}  TTL: 10 minutes
+          cms:cache:branding:{org_id}           TTL: 60 minutes
 Pub/sub: cms:stats:refreshed:{org_id}
+         cms:branding:updated:{org_id}
 """
 
 import asyncio
@@ -20,6 +22,7 @@ from app.workers.celery_app import app
 from app.workers.worker_logging import worker_log
 from app.cache.redis_client import get_redis_client
 from app.cache.dashboard_cache import get_cached_dashboard_stats, set_cached_dashboard_stats
+from app.cache.branding_cache import get_cached_branding, set_cached_branding, extract_branding
 from app.services.portfolio_stats import compute_portfolio_payload
 
 TAG = "DASHBOARD_STATS"
@@ -37,14 +40,15 @@ DEV_ORG_ID = "a0000000-0000-0000-0000-000000000001"
 )
 def refresh_dashboard_stats(self):
     """
-    Refresh dashboard stats for all active organizations.
+    Refresh dashboard stats + branding for all active organizations.
 
     Flow:
         1. Get list of active orgs (hardcoded for MVP, dynamic later)
         2. For each org, query database via ProviderRegistry
         3. Write full dashboard JSON to Redis L2 cache
-        4. Publish refresh event for any listeners
-        5. Write worker heartbeat
+        4. Refresh branding cache from business_profiles
+        5. Publish refresh events for any listeners
+        6. Write worker heartbeat
 
     The ProviderRegistry returns the same data shape regardless of
     whether DB_PROVIDER is 'supabase' or 'postgres'.
@@ -72,6 +76,7 @@ def refresh_dashboard_stats(self):
         for org_id in org_ids:
             try:
                 _refresh_org(providers, org_id)
+                _refresh_branding(providers, org_id)
                 refreshed += 1
             except Exception as org_exc:
                 worker_log(TAG, f"Failed for org {org_id}: {org_exc}")
@@ -132,6 +137,45 @@ def _refresh_org(providers, org_id: str):
     # This was defined but never called. The /owner/portfolio
     # endpoint needs this "portfolio" sub-key in the cache.
     _refresh_portfolio(providers, org_id)
+
+
+def _refresh_branding(providers, org_id: str):
+    """
+    Refresh branding cache from business_profiles.
+
+    Reads the full profile from Supabase, extracts the branding-relevant
+    fields (company_name, logo, address, invoice defaults), and writes
+    them to cms:cache:branding:{org_id} with a 1-hour TTL.
+
+    This runs alongside dashboard stats — same 5-min cycle, same
+    worker_ready pre-warm. Branding changes rarely, so most cycles
+    are a no-op overwrite of the same data. The Settings router does
+    a write-through for immediate updates when the owner saves.
+    """
+    try:
+        profile = asyncio.run(
+            providers.business_profiles.get_by_org(org_id)
+        )
+
+        if not profile:
+            worker_log(TAG, f"No business profile for org {org_id} — branding cache skipped")
+            return
+
+        branding = extract_branding(profile)
+        success = set_cached_branding(org_id, branding)
+
+        if success:
+            worker_log(
+                TAG,
+                f"Cached branding for org {org_id}: "
+                f"{branding.get('company_name', 'unnamed')}"
+            )
+        else:
+            worker_log(TAG, f"Branding cache write failed for org {org_id}")
+
+    except Exception as exc:
+        worker_log(TAG, f"Branding cache failed for org {org_id}: {exc}")
+        # Don't re-raise — let the main worker continue.
 
 
 # ── Portfolio-level async queries ─────────────────────────

@@ -5,6 +5,10 @@ Endpoints for business profile CRUD and onboarding.
 All endpoints scoped to the authenticated user's org.
 
 Dev mode: Uses hardcoded org_id until auth is implemented.
+
+Branding cache: Profile saves write-through to Redis so the
+sidebar, page titles, and invoice headers update immediately
+without waiting for the next worker cycle.
 """
 
 import logging
@@ -20,6 +24,7 @@ from app.models.business_profile import (
     OnboardingStepUpdate,
     OnboardingStatus,
 )
+from app.cache.branding_cache import set_cached_branding, extract_branding
 
 _log = logging.getLogger(__name__)
 
@@ -44,6 +49,27 @@ def _get_org_id() -> str:
         "DEV_ORG_ID",
         "a0000000-0000-0000-0000-000000000001"  # Metro Aerial (ERL seed)
     )
+
+
+# ── Cache write-through helper ────────────────────────
+
+def _update_branding_cache(org_id: str, profile: dict) -> None:
+    """
+    Write-through: update branding cache immediately after a profile save.
+
+    Extracts branding fields and writes to Redis. Publishes
+    cms:branding:updated:{org_id} so the frontend can react
+    without a page refresh.
+
+    Failures are logged but do not block the API response —
+    the worker will backfill on its next cycle.
+    """
+    try:
+        branding = extract_branding(profile)
+        set_cached_branding(org_id, branding)
+        _log.info("Branding cache updated for org %s", org_id)
+    except Exception as e:
+        _log.warning("Branding cache write-through failed for org %s: %s", org_id, e)
 
 
 # ── Profile CRUD ──────────────────────────────────────
@@ -83,6 +109,10 @@ async def create_profile(
     data["onboarding_step"] = 1
     profile = await repo.create(org_id, data)
     _log.info("Business profile created for org %s", org_id)
+
+    # Write-through: cache branding immediately
+    _update_branding_cache(org_id, profile)
+
     return profile
 
 
@@ -112,6 +142,10 @@ async def update_profile(
             data[key] = float(data[key])
 
     profile = await repo.update(org_id, data)
+
+    # Write-through: cache branding immediately
+    _update_branding_cache(org_id, profile)
+
     return profile
 
 
@@ -140,6 +174,10 @@ async def update_address(
         data["onboarding_step"] = 2
 
     profile = await repo.update(org_id, data)
+
+    # Write-through: cache branding immediately (address is part of branding)
+    _update_branding_cache(org_id, profile)
+
     return profile
 
 

@@ -44,10 +44,26 @@ class AuthRepository(SupabaseBaseRepository, IAuthRepository):
     # ── Business Owner Auth ───────────────────────────────
 
     async def get_user_profile(self, user_id: str) -> Optional[dict]:
-        """Fetch user_profile for an authenticated Supabase user."""
+        """
+        Fetch user_profile for an authenticated Supabase user.
+
+        Joins through organizations to business_profiles for branding:
+        company_name, logo, phone, email, industry, invoice defaults.
+        organizations.name is deprecated — company identity lives
+        in business_profiles (1:1 with organizations).
+        """
         result = (
             self.client.table("user_profiles")
-            .select("*, organizations(name, template, settings)")
+            .select(
+                "*, organizations("
+                "template, settings, "
+                "business_profiles("
+                "company_name, dba_name, logo_url, "
+                "phone, email, industry, "
+                "invoice_prefix, default_markup_pct, default_billing_cycle"
+                ")"
+                ")"
+            )
             .eq("id", user_id)
             .single()
             .execute()

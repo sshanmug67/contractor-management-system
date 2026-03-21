@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -12,6 +13,7 @@ import {
   MoreHorizontal,
 } from 'lucide-react';
 import { useAuthStore, switchDevRole } from '@/store/authStore';
+import { useBrandingStore, useCompanyName } from '@/store/brandingStore';
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', end: true },
@@ -24,18 +26,41 @@ const navItems = [
 
 export function OwnerLayout() {
   const { user } = useAuthStore();
+  const companyName = useCompanyName();
+  const logoUrl = useBrandingStore((s) => s.branding?.logo_url);
+  const fetchBranding = useBrandingStore((s) => s.fetchBranding);
+
+  // Fetch branding on first mount (cached in store — only fires once)
+  useEffect(() => {
+    fetchBranding();
+  }, [fetchBranding]);
+
+  // Update browser tab title with company name
+  useEffect(() => {
+    document.title = companyName !== 'CMS' ? companyName : 'Contractor MS';
+  }, [companyName]);
 
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar */}
       <aside className="w-[240px] bg-white border-r border-gray-200 flex flex-col">
-        {/* Logo */}
+        {/* Logo / Company Identity */}
         <div className="h-14 flex items-center gap-2.5 px-4 border-b border-gray-200">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-            <Building2 className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-gray-900 leading-none">Contractor MS</h1>
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt={companyName}
+              className="w-8 h-8 rounded-lg object-contain"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+              <Building2 className="w-4 h-4 text-white" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <h1 className="text-sm font-bold text-gray-900 leading-none truncate">
+              {companyName}
+            </h1>
             <p className="text-[10px] text-gray-400">Management System</p>
           </div>
         </div>
@@ -115,7 +140,7 @@ export function OwnerLayout() {
               <p className="text-[13px] font-medium text-gray-900 truncate">
                 {user?.name || 'Tom Wilson'}
               </p>
-              <p className="text-[11px] text-gray-400 truncate">{user?.email || 'ABC Properties LLC'}</p>
+              <p className="text-[11px] text-gray-400 truncate">{user?.email || 'owner@dev.local'}</p>
             </div>
             <MoreHorizontal className="w-4 h-4 text-gray-400" />
           </div>
